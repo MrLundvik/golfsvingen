@@ -2,6 +2,7 @@ package io.github.mrlundvik.golfsvingen.pose
 
 import android.content.Context
 import android.media.MediaMetadataRetriever
+import android.os.SystemClock
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
@@ -36,6 +37,7 @@ object PoseAnalyzer {
         val stride = max(1, (fps / ANALYSIS_FPS).roundToInt())
         val expected = if (meta.frames > 0) (meta.frames + stride - 1) / stride else 0
 
+        val startedAt = SystemClock.elapsedRealtime()
         val (landmarker, delegate) = createLandmarker(context)
         val times = ArrayList<Long>()
         val values = ArrayList<FloatArray>()
@@ -76,7 +78,7 @@ object PoseAnalyzer {
         require(times.isNotEmpty()) { "Inga bilder att analysera" }
         val data = FloatArray(values.size * Landmark.COUNT * 3)
         values.forEachIndexed { f, frame -> frame.copyInto(data, f * Landmark.COUNT * 3) }
-        PoseTrack(times.toLongArray(), data, width, height, delegate)
+        PoseTrack(times.toLongArray(), data, width, height, delegate, (SystemClock.elapsedRealtime() - startedAt).toInt())
     }
 
     private class Meta(val rotation: Int, val frames: Int, val durationMs: Double)

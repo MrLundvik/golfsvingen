@@ -22,6 +22,13 @@ object Landmark {
     const val HIP_L = 23
     const val HIP_R = 24
 
+    /** Par av vänster och höger punkt, i de kroppsdelar som kan förväxlas var för sig. */
+    val SIDE_GROUPS = listOf(
+        listOf(11 to 12, 13 to 14, 15 to 16, 17 to 18, 19 to 20, 21 to 22),
+        listOf(23 to 24, 25 to 26, 27 to 28, 29 to 30, 31 to 32),
+        listOf(1 to 4, 2 to 5, 3 to 6, 7 to 8, 9 to 10),
+    )
+
     val BONES = listOf(
         11 to 12, 23 to 24, 11 to 23, 12 to 24,
         11 to 13, 13 to 15, 15 to 19,
@@ -50,6 +57,8 @@ class PoseTrack(
     val width: Int,
     val height: Int,
     val delegate: String,
+    /** Hur lång tid analysen tog, 0 om det inte är känt. */
+    val analysisMs: Int = 0,
 ) {
     val size get() = timesUs.size
     private val stride = Landmark.COUNT * 3
@@ -57,6 +66,93 @@ class PoseTrack(
     fun found(frame: Int) = (0 until Landmark.COUNT).any { data[frame * stride + it * 3 + 2] > 0f }
 
     private fun pose(frame: Int) = Pose(data.copyOfRange(frame * stride, (frame + 1) * stride))
+
+    fun poseAt(frame: Int) = pose(frame)
+
+    /**
+     * Rättar de vanligaste felen från kroppsmodellen, som bara ser en platt bild:
+     * vänster och höger som byter plats, en handled som skyms av den andra handen,
+     * och korta luckor där modellen är osäker. Rådatan i cachen lämnas orörd.
+     */
+    fun cleaned(): PoseTrack {
+        val d = data.copyOf()
+        val scale = maxOf(width, height).toFloat()
+        fun x(f: Int, i: Int) = d[f * stride + i * 3]
+        fun y(f: Int, i: Int) = d[f * stride + i * 3 + 1]
+        fun v(f: Int, i: Int) = d[f * stride + i * 3 + 2]
+        fun set(f: Int, i: Int, nx: Float, ny: Float, nv: Float) {
+            d[f * stride + i * 3] = nx
+            d[f * stride + i * 3 + 1] = ny
+            d[f * stride + i * 3 + 2] = nv
+        }
+        fun dist(f: Int, i: Int, g: Int, j: Int) =
+            hypot((x(f, i) - x(g, j)) * width, (y(f, i) - y(g, j)) * height) / scale
+        val present = BooleanArray(size) { f -> (0 until Landmark.COUNT).any { v(f, it) > 0f } }
+
+        // 1. Vänster och höger: byt tillbaka en kroppsdel om den passar mycket bättre ombytt mot förra bilden
+        var prev = -1
+        for (f in 0 until size) {
+            if (!present[f]) continue
+            if (prev >= 0) for (group in Landmark.SIDE_GROUPS) {
+                var same = 0f
+                var swapped = 0f
+                for ((a, b) in group) {
+                    same += dist(f, a, prev, a) + dist(f, b, prev, b)
+                    swapped += dist(f, a, prev, b) + dist(f, b, prev, a)
+                }
+                if (same > 0.02f && swapped < 0.5f * same) {
+                    for ((a, b) in group) {
+                        val ax = x(f, a); val ay = y(f, a); val av = v(f, a)
+                        set(f, a, x(f, b), y(f, b), v(f, b))
+                        set(f, b, ax, ay, av)
+                    }
+                }
+            }
+            prev = f
+        }
+
+        // 2. Händerna sitter ihop i greppet. Är en handled osäker, eller orimligt långt från den andra, följer den den säkrare
+        for (f in 0 until size) {
+            if (!present[f]) continue
+            val torso = hypot(
+                ((x(f, Landmark.SHOULDER_L) + x(f, Landmark.SHOULDER_R)) - (x(f, Landmark.HIP_L) + x(f, Landmark.HIP_R))) / 2 * width,
+                ((y(f, Landmark.SHOULDER_L) + y(f, Landmark.SHOULDER_R)) - (y(f, Landmark.HIP_L) + y(f, Landmark.HIP_R))) / 2 * height,
+            ) / scale
+            val l = Landmark.WRIST_L
+            val r = Landmark.WRIST_R
+            val apart = dist(f, l, f, r) > 0.4f * torso
+            val (weak, strong) = if (v(f, l) < v(f, r)) l to r else r to l
+            if ((v(f, weak) < 0.5f && v(f, strong) > v(f, weak) + 0.2f) || apart) {
+                for (k in 0..3) { // handleden och handens tre punkter
+                    val w = weak + 2 * k
+                    val s = strong + 2 * k
+                    set(f, w, x(f, s), y(f, s), maxOf(0.5f, minOf(v(f, s), 0.6f)))
+                }
+            }
+        }
+
+        // 3. Korta luckor där en punkt är osäker fylls i mellan de närmaste säkra bilderna
+        val maxGapUs = 200_000L
+        for (i in 0 until Landmark.COUNT) {
+            var f = 0
+            while (f < size) {
+                if (!present[f] || v(f, i) >= 0.3f) { f++; continue }
+                val start = f
+                while (f < size && present[f] && v(f, i) < 0.3f) f++
+                val before = start - 1
+                val after = f
+                if (before >= 0 && after < size && present[before] && present[after] &&
+                    timesUs[after] - timesUs[before] <= maxGapUs
+                ) {
+                    for (g in start until after) {
+                        val t = (timesUs[g] - timesUs[before]).toFloat() / (timesUs[after] - timesUs[before])
+                        set(g, i, x(before, i) + (x(after, i) - x(before, i)) * t, y(before, i) + (y(after, i) - y(before, i)) * t, 0.4f)
+                    }
+                }
+            }
+        }
+        return PoseTrack(timesUs, d, width, height, delegate, analysisMs)
+    }
 
     /** Kroppen vid tiden [timeUs], interpolerad mellan de två närmaste analyserade bilderna. */
     fun at(timeUs: Long): Pose? {
@@ -115,7 +211,7 @@ class PoseTrack(
 /** Analysen sparas i appens egna filer, så att den bara behöver göras en gång per sving. */
 object PoseStore {
     private const val MAGIC = 0x47535031 // "GSP1"
-    private const val VERSION = 1
+    private const val VERSION = 2
 
     private fun file(context: Context, clip: Clip) =
         File(File(context.filesDir, "pose").apply { mkdirs() }, "${clip.uri.lastPathSegment}.bin")
@@ -124,14 +220,17 @@ object PoseStore {
         val f = file(context, clip)
         if (!f.exists()) return null
         DataInputStream(f.inputStream().buffered()).use { s ->
-            if (s.readInt() != MAGIC || s.readInt() != VERSION) return null
+            if (s.readInt() != MAGIC) return null
+            val version = s.readInt()
+            if (version !in 1..VERSION) return null
             val width = s.readInt()
             val height = s.readInt()
             val delegate = s.readUTF()
+            val analysisMs = if (version >= 2) s.readInt() else 0
             val n = s.readInt()
             val times = LongArray(n) { s.readLong() }
             val data = FloatArray(n * Landmark.COUNT * 3) { s.readFloat() }
-            PoseTrack(times, data, width, height, delegate)
+            PoseTrack(times, data, width, height, delegate, analysisMs)
         }
     }.getOrNull()
 
@@ -144,6 +243,7 @@ object PoseStore {
             s.writeInt(track.width)
             s.writeInt(track.height)
             s.writeUTF(track.delegate)
+            s.writeInt(track.analysisMs)
             s.writeInt(track.size)
             for (t in track.timesUs) s.writeLong(t)
             for (v in track.data) s.writeFloat(v)

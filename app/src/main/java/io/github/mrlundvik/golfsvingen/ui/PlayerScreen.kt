@@ -58,6 +58,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import io.github.mrlundvik.golfsvingen.analysis.Metric
+import io.github.mrlundvik.golfsvingen.analysis.SwingReport
+import io.github.mrlundvik.golfsvingen.analysis.View
 import io.github.mrlundvik.golfsvingen.pose.PoseAnalyzer
 import io.github.mrlundvik.golfsvingen.pose.PoseStore
 import io.github.mrlundvik.golfsvingen.pose.PoseTrack
@@ -156,6 +159,13 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
             analyzing = false
         }
     }
+    // Rättade punkter och svingrapporten, räknade ur analysen
+    val clean = remember(track) { track?.cleaned() }
+    var viewOverride by remember { mutableStateOf<View?>(null) }
+    val report = remember(clean, viewOverride) { clean?.let { runCatching { SwingReport.build(it, viewOverride) }.getOrNull() } }
+    var reportOpen by remember { mutableStateOf(false) }
+    var focus by remember { mutableStateOf<Metric?>(null) }
+    LaunchedEffect(report) { focus = null }
     var showSkeleton by remember { mutableStateOf(true) }
     var showPath by remember { mutableStateOf(true) }
     var showHead by remember { mutableStateOf(true) }
@@ -259,7 +269,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                 )
                 error != null -> TextButton(onClick = { analysisRun++ }) { Text("Analysen gick inte · Försök igen", color = Warn, fontSize = 13.sp) }
                 track != null -> Text(
-                    "Analyserad (${track?.delegate})",
+                    track?.let { t -> if (t.analysisMs > 0) "Analyserad (${t.delegate} · ${t.analysisMs / 1000} s)" else "Analyserad (${t.delegate})" } ?: "",
                     fontSize = 12.sp,
                     color = Color.White.copy(alpha = 0.5f),
                     modifier = Modifier.padding(end = 8.dp),
@@ -285,7 +295,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
             SwingOverlay(
                 modifier = Modifier.fillMaxSize(),
                 aspect = aspect,
-                track = track,
+                track = clean,
                 timeUs = position * 1000,
                 showSkeleton = showSkeleton,
                 showPath = showPath,
@@ -293,6 +303,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                 marks = marks,
                 tool = if (drawing && !trimming) tool else null,
                 onAdd = { marks += it; saveMarks() },
+                guide = if (reportOpen && !trimming) focus?.guide else null,
             )
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -335,6 +346,23 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                 }
                 OutlinedButton(onClick = { step(1) }, modifier = Modifier.weight(1f)) { Text("Bild ▶") }
             }
+            if (reportOpen && !trimming) {
+                val t = track
+                ReportPanel(
+                    report = report,
+                    footer = if (t != null && t.analysisMs > 0) "Analysen tog ${t.analysisMs / 1000} s med ${t.delegate}." else "",
+                    focusId = focus?.id,
+                    onView = { viewOverride = it },
+                    onSeek = { us -> player.pause(); player.seekTo(us / 1000) },
+                    onShow = { m ->
+                        focus = m
+                        showSkeleton = true
+                        player.pause()
+                        player.seekTo(m.timeUs / 1000)
+                    },
+                    onClose = { reportOpen = false },
+                )
+            } else {
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for ((value, label) in SPEEDS) {
                     FilterChip(
@@ -349,6 +377,12 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    FilterChip(
+                        selected = false,
+                        onClick = { reportOpen = true; drawing = false },
+                        label = { Text(if (report != null && report.faults.isNotEmpty()) "Rapport (${report.faults.size})" else "Rapport") },
+                        enabled = clean != null,
+                    )
                     FilterChip(selected = showSkeleton, onClick = { showSkeleton = !showSkeleton }, label = { Text("Skelett") }, enabled = track != null)
                     FilterChip(selected = showPath, onClick = { showPath = !showPath }, label = { Text("Handbana") }, enabled = track != null)
                     FilterChip(selected = showHead, onClick = { showHead = !showHead }, label = { Text("Huvud") }, enabled = track != null)
@@ -427,6 +461,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                         deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
                     }) { Text("Radera", color = Warn) }
                 }
+            }
             }
         }
     }

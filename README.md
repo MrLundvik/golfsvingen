@@ -1,6 +1,6 @@
 # Golfsvingen
 
-En Android-app som filmar golfsvingen i 240 fps och sparar den automatiskt när du slår. Målet är att appen ska analysera svingen, visa de viktigaste felen och föreslå övningar. Version 0.2 hittar kroppen i varje bild och ritar skelett, handbana och huvudets läge på videon, och du kan rita egna linjer och vinklar. Att mäta och rangordna felen kommer i nästa steg.
+En Android-app som filmar golfsvingen i 240 fps och sparar den automatiskt när du slår. Målet är att appen ska analysera svingen, visa de viktigaste felen och föreslå övningar. Version 0.3 hittar kroppen i varje bild, delar in svingen i faser, mäter de vanligaste felen och rangordnar dem, och visar för varje fel hur det ser ut på videon och vilka övningar som hjälper.
 
 Byggd för Pixel 10 Pro, men fungerar på telefoner vars bakre kamera har ett höghastighetsläge.
 
@@ -43,6 +43,31 @@ När du öppnar en sving första gången letar appen upp kroppen i 120 bilder pe
 
 Vinklarna mäts i bilden och beror därför på var kameran står. Jämför helst svingar som är filmade från samma ställe.
 
+Kroppsmodellen ser bara en platt bild. Appen rättar därför tre vanliga fel innan något ritas eller mäts. Vänster och höger som byter plats mellan två bilder byts tillbaka. En handled som skyms av den andra handen följer den säkrare, eftersom händerna sitter ihop i greppet. Korta luckor, under 0,2 s, där en punkt är osäker fylls i mellan de närmaste säkra bilderna.
+
+## Svingrapporten
+
+Tryck på **Rapport** under videon. Appen hittar svingens faser, alltså uppställning, topp, träff och avslut, och du hoppar till dem med knapparna. Klippet behöver börja i uppställningen och sluta efter träffen.
+
+Felen som mäts beror på var kameran står. Appen gissar det från bilden, och du kan ändra det:
+
+| | Mätning | Fel när |
+|---|---|---|
+| Båda | Tempo, backswing mot nedsving | under 2,2 : 1 eller över 4,5 : 1 |
+| Båda | Huvudets höjd i träffen | mer än 8 cm ned eller 5 cm upp |
+| Framifrån | Höften vid toppen | mer än 8 cm bort från målet |
+| Framifrån | Huvudet i träffen | mer än 5 cm mot målet |
+| Framifrån | Ryggen vid toppen | lutar mot målet (omvänd pivot) |
+| Framifrån | Vikten i avslutet | höften mindre än 60 % av vägen mot främre foten |
+| Framifrån | Ledarmen vid toppen | böjd mer än till 140° |
+| Bakifrån | Höften i träffen | mer än 5 cm mot bollen (early extension) |
+| Bakifrån | Ryggvinkeln i träffen | mer än 10° mer upprätt än i uppställningen |
+| Bakifrån | Händerna i nedsvingen | mer än 4 cm utanför backswingen (över toppen) |
+
+Felen rangordnas efter hur stora de är och hur grundläggande de är. Tryck på ett fel för att läsa vad det innebär, hur det ska se ut och vilka övningar som hjälper, med länkar till filmer. **Visa** hoppar till rätt bild och ritar referenslinjer, med uppställningen som en vit skugga så att det syns vad som rört sig.
+
+Centimetrarna räknas fram med benlängden, höft till fotled, som skala. Den antas vara 80 cm. Gränserna är uppskattade och en utgångspunkt, inte en sanning. De justeras när fler svingar har testats.
+
 Analysen körs på grafikprocessorn. Fungerar inte den används processorn i stället, och det står vilken som användes överst till höger.
 
 ## Mikrofonen
@@ -55,7 +80,7 @@ Mikrofonen används bara för att känna igen bollträffen. Ljudet analyseras i 
 |---|---|
 | 0.1 | Egen kamera i 240 fps, ljudtrigger med förtid, självutlösare, bibliotek, slow motion och bildstegning, klippning, spara till Drive |
 | 0.2 | Kroppspunkter (MediaPipe) ritade på videon, och ritverktyg för linjer och vinklar |
-| 0.3 | Svingens faser hittas automatiskt, felen mäts och rangordnas, och varje fel får övningar |
+| 0.3 | Rättning av kroppspunkterna, svingens faser, felen mäts och rangordnas, och varje fel får förklaring och övningar |
 | 0.4 | Två svingar sida vid sida, och utvecklingen över tid |
 
 ## Bygga

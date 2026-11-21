@@ -26,15 +26,23 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
+import io.github.mrlundvik.golfsvingen.analysis.DownswingColor
+import io.github.mrlundvik.golfsvingen.analysis.GoodColor
+import io.github.mrlundvik.golfsvingen.analysis.Guide
+import io.github.mrlundvik.golfsvingen.analysis.GuideLine
 import io.github.mrlundvik.golfsvingen.pose.Landmark
 import io.github.mrlundvik.golfsvingen.pose.Pose
 import io.github.mrlundvik.golfsvingen.pose.PoseTrack
 import io.github.mrlundvik.golfsvingen.store.Clip
 import java.io.File
 import kotlin.math.acos
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.hypot
 import kotlin.math.min
 
@@ -119,6 +127,7 @@ fun SwingOverlay(
     marks: List<Mark>,
     tool: Tool?,
     onAdd: (Mark) -> Unit,
+    guide: Guide? = null,
 ) {
     val add by rememberUpdatedState(onAdd)
     var dragStart by remember { mutableStateOf<Offset?>(null) }
@@ -178,6 +187,8 @@ fun SwingOverlay(
         textPaint.textSize = 15.sp.toPx()
 
         val pose = track?.at(timeUs)
+        // Uppställningen som skugga, bakom allt annat
+        guide?.ghost?.let { drawSkeleton(it, pxy, ghost = true) }
         if (track != null) {
             if (showHead) track.address?.let { start ->
                 val (hx, hy, hr) = track.head(start)
@@ -192,11 +203,22 @@ fun SwingOverlay(
                     drawCircle(Sun, radius = 7f, center = pxy(cx, cy))
                 }
             }
-            if (showPath) drawHandPath(track, timeUs, pxy)
+            if (showPath || guide?.pathSplitUs != null) drawHandPath(track, timeUs, pxy, guide?.pathSplitUs)
             if (showSkeleton && pose != null) {
                 drawSkeleton(pose, pxy)
+                for ((i, j) in guide?.bones.orEmpty()) {
+                    drawLine(Sun, pxy(pose.x(i), pose.y(i)), pxy(pose.x(j), pose.y(j)), strokeWidth = 11f, cap = StrokeCap.Round)
+                }
                 val tilt = track.spineTilt(pose)
                 drawLabel("Ryggen ${tilt.toInt()}°", Offset(r.left + 12f, r.bottom - 16f), textPaint)
+            }
+        }
+
+        if (guide != null) {
+            for (line in guide.lines) drawGuideLine(line, pxo)
+            for (label in guide.labels) {
+                val paint = Paint(textPaint).apply { color = label.color.toArgb() }
+                drawLabel(label.text, pxo(label.at), paint)
             }
         }
 
@@ -219,16 +241,18 @@ fun SwingOverlay(
     }
 }
 
-private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset) {
+private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost: Boolean = false) {
     for ((i, j) in Landmark.BONES) {
         if (p.v(i) < 0.2f || p.v(j) < 0.2f) continue
         val color = when {
-            i % 2 == 1 && j % 2 == 1 -> LeftSide
-            i % 2 == 0 && j % 2 == 0 -> RightSide
-            else -> Color.White
+            ghost -> Color.White.copy(alpha = 0.35f)
+            i % 2 == 1 && j % 2 == 1 -> LeftSide.copy(alpha = 0.9f)
+            i % 2 == 0 && j % 2 == 0 -> RightSide.copy(alpha = 0.9f)
+            else -> Color.White.copy(alpha = 0.9f)
         }
-        drawLine(color.copy(alpha = 0.9f), px(p.x(i), p.y(i)), px(p.x(j), p.y(j)), strokeWidth = 6f, cap = StrokeCap.Round)
+        drawLine(color, px(p.x(i), p.y(i)), px(p.x(j), p.y(j)), strokeWidth = if (ghost) 4f else 6f, cap = StrokeCap.Round)
     }
+    if (ghost) return
     for (i in Landmark.JOINTS) {
         if (p.v(i) < 0.2f) continue
         drawCircle(Color.White, radius = 7f, center = px(p.x(i), p.y(i)))
@@ -239,9 +263,28 @@ private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset) {
     drawLine(Sun, hip, sh, strokeWidth = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f)))
 }
 
-private fun DrawScope.drawHandPath(track: PoseTrack, timeUs: Long, px: (Float, Float) -> Offset) {
+private fun DrawScope.drawHandPath(track: PoseTrack, timeUs: Long, px: (Float, Float) -> Offset, splitUs: Long?) {
     val points = track.handPath
     if (points.size < 2) return
+    if (splitUs != null) {
+        // Backswingen grön och nedsvingen orange, för att jämföra banorna
+        val up = Path()
+        val down = Path()
+        var upStarted = false
+        var downStarted = false
+        for (pt in points) {
+            val o = px(pt.second, pt.third)
+            if (pt.first <= splitUs) {
+                if (!upStarted) { up.moveTo(o.x, o.y); upStarted = true } else up.lineTo(o.x, o.y)
+            }
+            if (pt.first >= splitUs) {
+                if (!downStarted) { down.moveTo(o.x, o.y); downStarted = true } else down.lineTo(o.x, o.y)
+            }
+        }
+        drawPath(up, GoodColor, style = Stroke(width = 6f, cap = StrokeCap.Round))
+        drawPath(down, DownswingColor, style = Stroke(width = 6f, cap = StrokeCap.Round))
+        return
+    }
     val all = Path()
     val done = Path()
     var started = false
@@ -273,6 +316,22 @@ private fun DrawScope.drawMark(m: Mark, r: Rect, stroke: Float, paint: Paint, px
             drawCircle(MarkColor, radius = 8f, center = v)
             val deg = angleDeg(m.a, m.vertex, m.b, r.width, r.height)
             drawLabel("${deg.toInt()}°", Offset(v.x + 14f, v.y - 14f), paint)
+        }
+    }
+}
+
+private fun DrawScope.drawGuideLine(line: GuideLine, px: (Offset) -> Offset) {
+    val a = px(line.a)
+    val b = px(line.b)
+    drawLine(
+        line.color, a, b, strokeWidth = 5f, cap = StrokeCap.Round,
+        pathEffect = if (line.dashed) PathEffect.dashPathEffect(floatArrayOf(16f, 10f)) else null,
+    )
+    if (line.arrow && hypot(b.x - a.x, b.y - a.y) > 8f) {
+        val angle = atan2(b.y - a.y, b.x - a.x)
+        for (side in listOf(-1f, 1f)) {
+            val back = angle + Math.PI.toFloat() + side * 0.45f
+            drawLine(line.color, b, Offset(b.x + 22f * cos(back), b.y + 22f * sin(back)), strokeWidth = 5f, cap = StrokeCap.Round)
         }
     }
 }
