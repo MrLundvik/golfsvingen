@@ -3,8 +3,11 @@ package io.github.mrlundvik.golfsvingen.store
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.media.MediaCodec
+import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.net.Uri
 import android.provider.MediaStore
@@ -17,7 +20,8 @@ import java.util.Locale
 data class Clip(
     val uri: Uri,
     val name: String,
-    val dateAddedSec: Long,
+    /** När svingen filmades. Läses ur filnamnet, så att ett klipp behåller originalets tid. */
+    val takenSec: Long,
     val durationMs: Long,
     val sizeBytes: Long,
 )
@@ -25,10 +29,137 @@ data class Clip(
 /** Svingarna sparas i telefonens Filmer/Golfsvingen, så att de syns i Google Foto och Filer. */
 object ClipStore {
     const val FOLDER = "Movies/Golfsvingen"
+    private const val STAMP = "yyyyMMdd_HHmmss"
+    private val stampInName = Regex("""\d{8}_\d{6}""")
+    private val projection = arrayOf(
+        MediaStore.Video.Media._ID,
+        MediaStore.Video.Media.DISPLAY_NAME,
+        MediaStore.Video.Media.DATE_ADDED,
+        MediaStore.Video.Media.DURATION,
+        MediaStore.Video.Media.SIZE,
+    )
 
     fun write(context: Context, frames: List<RingBufferEncoder.Frame>, format: MediaFormat, rotation: Int): String {
         require(frames.isNotEmpty()) { "Inga bilder att spara" }
-        val name = "Golfsvingen_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(Date()) + ".mp4"
+        val name = "Golfsvingen_" + SimpleDateFormat(STAMP, Locale.ROOT).format(Date()) + ".mp4"
+        create(context, name) { muxer ->
+            muxer.setOrientationHint(rotation)
+            val track = muxer.addTrack(format)
+            muxer.start()
+            val base = frames.first().ptsUs
+            val info = MediaCodec.BufferInfo()
+            for (f in frames) {
+                info.set(0, f.data.size, f.ptsUs - base, if (f.key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
+                muxer.writeSampleData(track, ByteBuffer.wrap(f.data), info)
+            }
+        }
+        return name
+    }
+
+    /** Tiderna för filmens nyckelbilder, i µs. Ett klipp kan bara börja på en nyckelbild utan att videon kodas om. */
+    fun keyFrameTimesUs(context: Context, uri: Uri): List<Long> {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, uri, null)
+            extractor.selectTrack(videoTrack(extractor))
+            val out = mutableListOf<Long>()
+            while (true) {
+                val t = extractor.sampleTime
+                if (t < 0) break
+                if ((extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0) out += t
+                if (!extractor.advance()) break
+            }
+            return out
+        } finally {
+            extractor.release()
+        }
+    }
+
+    /**
+     * Sparar avsnittet [startUs]–[endUs] som en ny fil. Bilderna kopieras utan omkodning,
+     * så kvaliteten är oförändrad, men klippet börjar på närmaste nyckelbild före [startUs].
+     */
+    fun trim(context: Context, src: Clip, startUs: Long, endUs: Long): Clip {
+        val rotation = MediaMetadataRetriever().use { r ->
+            r.setDataSource(context, src.uri)
+            r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        }
+        val name = src.name.removeSuffix(".mp4").replace(Regex("""(_klipp)+$"""), "") + "_klipp.mp4"
+        val extractor = MediaExtractor()
+        val uri = try {
+            extractor.setDataSource(context, src.uri, null)
+            val track = videoTrack(extractor)
+            val format = extractor.getTrackFormat(track)
+            extractor.selectTrack(track)
+            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            val base = extractor.sampleTime
+            require(base >= 0) { "Klippet är tomt" }
+            val buffer = ByteBuffer.allocate(maxOf(format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 0), 8 shl 20))
+            create(context, name) { muxer ->
+                muxer.setOrientationHint(rotation)
+                val out = muxer.addTrack(format)
+                muxer.start()
+                val info = MediaCodec.BufferInfo()
+                while (true) {
+                    val t = extractor.sampleTime
+                    if (t < 0 || t > endUs) break
+                    val size = extractor.readSampleData(buffer, 0)
+                    if (size < 0) break
+                    val key = (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0
+                    info.set(0, size, t - base, if (key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
+                    muxer.writeSampleData(out, buffer, info)
+                    if (!extractor.advance()) break
+                }
+            }
+        } finally {
+            extractor.release()
+        }
+        return get(context, uri) ?: Clip(uri, name, src.takenSec, (endUs - startUs) / 1000, 0)
+    }
+
+    /** Lägger appens egen fil i papperskorgen, där den finns kvar i 30 dagar. False om filen inte är appens. */
+    fun trash(context: Context, uri: Uri): Boolean =
+        try {
+            val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }
+            context.contentResolver.update(uri, values, null, null) > 0
+        } catch (e: SecurityException) {
+            false
+        }
+
+    fun list(context: Context): List<Clip> {
+        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        val out = mutableListOf<Clip>()
+        context.contentResolver.query(
+            collection, projection,
+            "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("$FOLDER%"),
+            null,
+        )?.use { c ->
+            while (c.moveToNext()) out += c.toClip(ContentUris.withAppendedId(collection, c.getLong(0)))
+        }
+        return out.sortedByDescending { it.takenSec }
+    }
+
+    fun get(context: Context, uri: Uri): Clip? =
+        context.contentResolver.query(uri, projection, null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.toClip(uri) else null
+        }
+
+    private fun Cursor.toClip(uri: Uri): Clip {
+        val name = getString(1) ?: ""
+        return Clip(uri, name, takenSec(name) ?: getLong(2), getLong(3), getLong(4))
+    }
+
+    private fun takenSec(name: String): Long? =
+        stampInName.find(name)?.let { m ->
+            runCatching { SimpleDateFormat(STAMP, Locale.ROOT).parse(m.value)?.time?.div(1000) }.getOrNull()
+        }
+
+    private fun videoTrack(extractor: MediaExtractor): Int =
+        (0 until extractor.trackCount).firstOrNull {
+            extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
+        } ?: throw IllegalStateException("Filen har ingen video")
+
+    private fun create(context: Context, name: String, body: (MediaMuxer) -> Unit): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)
@@ -43,15 +174,7 @@ object ClipStore {
             pfd.use {
                 val muxer = MediaMuxer(it.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
                 try {
-                    muxer.setOrientationHint(rotation)
-                    val track = muxer.addTrack(format)
-                    muxer.start()
-                    val base = frames.first().ptsUs
-                    val info = MediaCodec.BufferInfo()
-                    for (f in frames) {
-                        info.set(0, f.data.size, f.ptsUs - base, if (f.key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
-                        muxer.writeSampleData(track, ByteBuffer.wrap(f.data), info)
-                    }
+                    body(muxer)
                     muxer.stop()
                 } finally {
                     muxer.release()
@@ -60,43 +183,10 @@ object ClipStore {
             values.clear()
             values.put(MediaStore.Video.Media.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
-            return name
+            return uri
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             throw e
         }
-    }
-
-    fun list(context: Context): List<Clip> {
-        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        val projection = arrayOf(
-            MediaStore.Video.Media._ID,
-            MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.DATE_ADDED,
-            MediaStore.Video.Media.DURATION,
-            MediaStore.Video.Media.SIZE,
-        )
-        val out = mutableListOf<Clip>()
-        context.contentResolver.query(
-            collection, projection,
-            "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("$FOLDER%"),
-            "${MediaStore.Video.Media.DATE_ADDED} DESC",
-        )?.use { c ->
-            val id = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-            val name = c.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
-            val date = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
-            val dur = c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
-            val size = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
-            while (c.moveToNext()) {
-                out += Clip(
-                    uri = ContentUris.withAppendedId(collection, c.getLong(id)),
-                    name = c.getString(name) ?: "",
-                    dateAddedSec = c.getLong(date),
-                    durationMs = c.getLong(dur),
-                    sizeBytes = c.getLong(size),
-                )
-            }
-        }
-        return out
     }
 }

@@ -107,9 +107,10 @@ private fun ClipRow(clip: Clip, onClick: () -> Unit) {
         Thumb(clip.uri)
         Spacer(Modifier.width(14.dp))
         Column {
-            Text(dateFormat.format(Date(clip.dateAddedSec * 1000)), style = MaterialTheme.typography.titleMedium)
+            Text(dateFormat.format(Date(clip.takenSec * 1000)), style = MaterialTheme.typography.titleMedium)
             val seconds = String.format(Locale("sv", "SE"), "%.1f", clip.durationMs / 1000.0)
-            Text("$seconds s · ${clip.sizeBytes / 1_000_000} MB", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+            val trimmed = if (clip.name.contains("_klipp")) " · klippt" else ""
+            Text("$seconds s · ${clip.sizeBytes / 1_000_000} MB$trimmed", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
         }
     }
 }
