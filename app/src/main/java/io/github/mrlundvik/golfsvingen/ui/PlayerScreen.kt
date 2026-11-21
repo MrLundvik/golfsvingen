@@ -10,6 +10,11 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,6 +25,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
@@ -30,6 +36,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -50,8 +58,12 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import io.github.mrlundvik.golfsvingen.pose.PoseAnalyzer
+import io.github.mrlundvik.golfsvingen.pose.PoseStore
+import io.github.mrlundvik.golfsvingen.pose.PoseTrack
 import io.github.mrlundvik.golfsvingen.store.Clip
 import io.github.mrlundvik.golfsvingen.store.ClipStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -102,6 +114,62 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
         }
     }
     val snapStart: (Long) -> Long = { ms -> keyFramesMs.lastOrNull { it <= ms } ?: 0L }
+    // Bildens upprätta proportioner, för att lägga kroppspunkter och markeringar rätt på videon
+    val aspect by produceState(0f, clip.uri) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                MediaMetadataRetriever().use { r ->
+                    r.setDataSource(context, clip.uri)
+                    val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)!!.toFloat()
+                    val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)!!.toFloat()
+                    val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                    if (rot == 90 || rot == 270) h / w else w / h
+                }
+            }.getOrDefault(0f)
+        }
+    }
+
+    // Kroppsanalysen görs en gång per sving och sparas
+    var track by remember { mutableStateOf<PoseTrack?>(null) }
+    var analysisProgress by remember { mutableFloatStateOf(0f) }
+    var analyzing by remember { mutableStateOf(false) }
+    var analysisError by remember { mutableStateOf<String?>(null) }
+    var analysisRun by remember { mutableIntStateOf(0) }
+    LaunchedEffect(clip.uri, analysisRun) {
+        analysisError = null
+        val cached = withContext(Dispatchers.IO) { PoseStore.load(context, clip) }
+        if (cached != null) {
+            track = cached
+            return@LaunchedEffect
+        }
+        analyzing = true
+        analysisProgress = 0f
+        try {
+            val result = PoseAnalyzer.analyze(context, clip) { p -> analysisProgress = p }
+            withContext(Dispatchers.IO) { PoseStore.save(context, clip, result) }
+            track = result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            analysisError = e.message ?: e.javaClass.simpleName
+        } finally {
+            analyzing = false
+        }
+    }
+    var showSkeleton by remember { mutableStateOf(true) }
+    var showPath by remember { mutableStateOf(true) }
+    var showHead by remember { mutableStateOf(true) }
+    var drawing by remember { mutableStateOf(false) }
+    var tool by remember { mutableStateOf<Tool?>(null) }
+    val marks = remember { mutableStateListOf<Mark>() }
+    LaunchedEffect(clip.uri) {
+        marks.clear()
+        marks.addAll(withContext(Dispatchers.IO) { MarkStore.load(context, clip) })
+    }
+    val saveMarks: () -> Unit = {
+        val copy = marks.toList()
+        scope.launch(Dispatchers.IO) { runCatching { MarkStore.save(context, clip, copy) } }
+    }
 
     var speed by remember { mutableFloatStateOf(0.125f) }
     var position by remember { mutableLongStateOf(0L) }
@@ -119,7 +187,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
             playing = player.isPlaying
             // I klippläget spelas bara det valda avsnittet, om och om igen
             if (trimming && playing && (position >= trimEnd || position < trimStart)) player.seekTo(trimStart)
-            delay(33)
+            delay(16)
         }
     }
 
@@ -180,18 +248,53 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("‹ Mina svingar") }
             if (trimming) Text("Klipp svingen", color = Sun, modifier = Modifier.padding(start = 8.dp))
+            Spacer(Modifier.weight(1f))
+            val error = analysisError
+            when {
+                analyzing -> Text(
+                    String.format(SV, "Analyserar kroppen … %.0f %%", analysisProgress * 100),
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                error != null -> TextButton(onClick = { analysisRun++ }) { Text("Analysen gick inte · Försök igen", color = Warn, fontSize = 13.sp) }
+                track != null -> Text(
+                    "Analyserad (${track?.delegate})",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
         }
-        AndroidView(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    this.player = player
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    setShutterBackgroundColor(android.graphics.Color.BLACK)
-                }
-            },
-        )
+        if (analyzing) LinearProgressIndicator(progress = { analysisProgress }, modifier = Modifier.fillMaxWidth())
+        analysisError?.let {
+            Text(it, fontSize = 12.sp, color = Warn, modifier = Modifier.padding(horizontal = 16.dp))
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        this.player = player
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        setShutterBackgroundColor(android.graphics.Color.BLACK)
+                    }
+                },
+            )
+            SwingOverlay(
+                modifier = Modifier.fillMaxSize(),
+                aspect = aspect,
+                track = track,
+                timeUs = position * 1000,
+                showSkeleton = showSkeleton,
+                showPath = showPath,
+                showHead = showHead,
+                marks = marks,
+                tool = if (drawing && !trimming) tool else null,
+                onAdd = { marks += it; saveMarks() },
+            )
+        }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             val range = 0f..max(1L, duration).toFloat()
             if (trimming) {
@@ -238,6 +341,40 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                         selected = speed == value,
                         onClick = { speed = value; player.setPlaybackSpeed(value) },
                         label = { Text(label) },
+                    )
+                }
+            }
+            if (!trimming) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(selected = showSkeleton, onClick = { showSkeleton = !showSkeleton }, label = { Text("Skelett") }, enabled = track != null)
+                    FilterChip(selected = showPath, onClick = { showPath = !showPath }, label = { Text("Handbana") }, enabled = track != null)
+                    FilterChip(selected = showHead, onClick = { showHead = !showHead }, label = { Text("Huvud") }, enabled = track != null)
+                    FilterChip(selected = drawing, onClick = { drawing = !drawing; if (drawing && tool == null) tool = Tool.LINE }, label = { Text("Rita") })
+                }
+                if (drawing) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        for ((t, label) in listOf(Tool.LINE to "Linje", Tool.ANGLE to "Vinkel", Tool.CIRCLE to "Cirkel")) {
+                            FilterChip(selected = tool == t, onClick = { tool = t }, label = { Text(label) })
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        TextButton(onClick = { if (marks.isNotEmpty()) { marks.removeAt(marks.lastIndex); saveMarks() } }, enabled = marks.isNotEmpty()) { Text("Ångra") }
+                        TextButton(onClick = { marks.clear(); saveMarks() }, enabled = marks.isNotEmpty()) { Text("Rensa") }
+                    }
+                    Text(
+                        when (tool) {
+                            Tool.ANGLE -> "Tryck på tre punkter: en ände, spetsen, den andra änden."
+                            Tool.CIRCLE -> "Dra från mitten och ut."
+                            else -> "Dra en linje på videon."
+                        },
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.6f),
                     )
                 }
             }

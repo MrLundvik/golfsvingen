@@ -5,6 +5,8 @@ plugins {
 }
 
 val runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+// Samma version står i .github/workflows/build.yml
+val appVersion = "0.2"
 val keystoreFile = file("golfsvingen.p12")
 
 android {
@@ -16,7 +18,14 @@ android {
         minSdk = 30
         targetSdk = 35
         versionCode = runNumber
-        versionName = "0.1.$runNumber"
+        versionName = "$appVersion.$runNumber"
+        // Bara 64-bitars ARM, som alla moderna telefoner. Halverar appens storlek
+        ndk { abiFilters += "arm64-v8a" }
+    }
+
+    // MediaPipe läser kroppsmodellen direkt ur appen, och då får den inte vara komprimerad
+    androidResources {
+        noCompress += "task"
     }
 
     signingConfigs {
@@ -67,4 +76,5 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.annotation:annotation-experimental:1.4.1")
+    implementation("com.google.mediapipe:tasks-vision:0.10.35")
 }

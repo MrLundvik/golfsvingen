@@ -1,6 +1,6 @@
 # Golfsvingen
 
-En Android-app som filmar golfsvingen i 240 fps och sparar den automatiskt när du slår. Målet är att appen ska analysera svingen, visa de viktigaste felen och föreslå övningar. Version 0.1 filmar, sparar och spelar upp i slow motion. Analysen kommer i nästa steg.
+En Android-app som filmar golfsvingen i 240 fps och sparar den automatiskt när du slår. Målet är att appen ska analysera svingen, visa de viktigaste felen och föreslå övningar. Version 0.2 hittar kroppen i varje bild och ritar skelett, handbana och huvudets läge på videon, och du kan rita egna linjer och vinklar. Att mäta och rangordna felen kommer i nästa steg.
 
 Byggd för Pixel 10 Pro, men fungerar på telefoner vars bakre kamera har ett höghastighetsläge.
 
@@ -31,6 +31,19 @@ I telefonens *Filmer/Golfsvingen*. De syns i Google Foto och Filer. Under **Mina
 **Klipp** tar bort det du inte vill spara, till exempel sekunderna när du står still. Dra i reglagets två ändar, eller stega fram till rätt bild och tryck **Start här** och **Slut här**. Medan du klipper spelas bara det valda avsnittet. **Spara klippet** sparar det som en ny fil och lägger originalet i papperskorgen, där det finns kvar i 30 dagar. Bilderna kopieras utan omkodning, så kvaliteten är oförändrad, men klippet börjar på närmaste nyckelbild, högst en halv sekund före den bild du valt.
 
 Filerna har verklig tid, 240 bilder per sekund. Andra spelare visar dem därför i normal fart.
+
+## Analysen
+
+När du öppnar en sving första gången letar appen upp kroppen i 120 bilder per sekund. Det tar en stund, mest för långa klipp, så klipp gärna svingen först. Resultatet sparas, och nästa gång visas det direkt. Allt sker i telefonen, med Googles kroppsmodell MediaPipe Pose (*heavy*). Ingen video lämnar telefonen.
+
+- **Skelett.** Vänster sida är grön och höger blå. Den streckade gula linjen är ryggen, från höfternas mitt till axlarnas, och siffran nere till vänster är dess lutning från lodlinjen.
+- **Handbana.** Händernas väg genom svingen. Den svaga linjen är hela banan, och den starka den del som spelats hittills.
+- **Huvud.** Den streckade cirkeln är huvudets läge i klippets första bild, alltså uppställningen om klippet börjar där. Den gula pricken är huvudet nu.
+- **Rita.** Linje, vinkel och cirkel. Vinkeln visar gradtalet. Markeringarna sparas med svingen. **Ångra** tar bort den senaste, och **Rensa** alla.
+
+Vinklarna mäts i bilden och beror därför på var kameran står. Jämför helst svingar som är filmade från samma ställe.
+
+Analysen körs på grafikprocessorn. Fungerar inte den används processorn i stället, och det står vilken som användes överst till höger.
 
 ## Mikrofonen
 

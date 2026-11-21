@@ -8,3 +8,5 @@ local.properties
 *.p12
 *.keystore
 *.jks
+# Kroppsmodellen hämtas vid bygget
+app/src/main/assets/*.task
