@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Golfsvingen" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bakgrund</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+    <color name="bakgrund">#0F1512</color>
+    <color name="ikon_bakgrund">#1E6B45</color>
+</resources>

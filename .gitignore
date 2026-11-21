@@ -1,0 +1,10 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+# Signeringsnyckeln ligger aldrig i repot, bara som hemlighet i GitHub
+*.p12
+*.keystore
+*.jks
