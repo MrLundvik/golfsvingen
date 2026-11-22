@@ -42,11 +42,15 @@ object Landmark {
 /** Händernas läge vid en tid, som andelar av bildens bredd och höjd. */
 class HandPoint(val t: Long, val x: Float, val y: Float)
 
-/** En bild: x och y är andelar av bildens bredd och höjd, v är hur säkert punkten syns (0–1). */
-class Pose(val data: FloatArray) {
+/**
+ * En bild: x och y är andelar av bildens bredd och höjd, v är hur säkert punkten syns (0–1).
+ * [depth] är modellens uppskattade djup per punkt, i bildbredder från höfternas mitt. Mindre är närmare kameran.
+ */
+class Pose(val data: FloatArray, val depth: FloatArray? = null) {
     fun x(i: Int) = data[i * 3]
     fun y(i: Int) = data[i * 3 + 1]
     fun v(i: Int) = data[i * 3 + 2]
+    fun z(i: Int) = depth?.get(i) ?: 0f
 }
 
 /**
@@ -62,13 +66,18 @@ class PoseTrack(
     val delegate: String,
     /** Hur lång tid analysen tog, 0 om det inte är känt. */
     val analysisMs: Int = 0,
+    /** Per bild 33 djupvärden, se [Pose.depth]. Null i analyser från före 0.4.9. */
+    val depth: FloatArray? = null,
 ) {
     val size get() = timesUs.size
     private val stride = Landmark.COUNT * 3
 
     fun found(frame: Int) = (0 until Landmark.COUNT).any { data[frame * stride + it * 3 + 2] > 0f }
 
-    private fun pose(frame: Int) = Pose(data.copyOfRange(frame * stride, (frame + 1) * stride))
+    private fun pose(frame: Int) = Pose(
+        data.copyOfRange(frame * stride, (frame + 1) * stride),
+        depth?.copyOfRange(frame * Landmark.COUNT, (frame + 1) * Landmark.COUNT),
+    )
 
     fun poseAt(frame: Int) = pose(frame)
 
@@ -79,6 +88,8 @@ class PoseTrack(
      */
     fun cleaned(): PoseTrack {
         val d = data.copyOf()
+        val dz = depth?.copyOf()
+        val n = Landmark.COUNT
         val scale = maxOf(width, height).toFloat()
         fun x(f: Int, i: Int) = d[f * stride + i * 3]
         fun y(f: Int, i: Int) = d[f * stride + i * 3 + 1]
@@ -108,6 +119,7 @@ class PoseTrack(
                         val ax = x(f, a); val ay = y(f, a); val av = v(f, a)
                         set(f, a, x(f, b), y(f, b), v(f, b))
                         set(f, b, ax, ay, av)
+                        if (dz != null) dz[f * n + a] = dz[f * n + b].also { dz[f * n + b] = dz[f * n + a] }
                     }
                 }
             }
@@ -148,6 +160,7 @@ class PoseTrack(
                     val w = weak + 2 * k
                     val s = strong + 2 * k
                     set(f, w, x(f, s), y(f, s), maxOf(0.5f, minOf(v(f, s), 0.6f)))
+                    if (dz != null) dz[f * n + w] = dz[f * n + s]
                 }
             }
         }
@@ -168,11 +181,21 @@ class PoseTrack(
                     for (g in start until after) {
                         val t = (timesUs[g] - timesUs[before]).toFloat() / (timesUs[after] - timesUs[before])
                         set(g, i, x(before, i) + (x(after, i) - x(before, i)) * t, y(before, i) + (y(after, i) - y(before, i)) * t, 0.4f)
+                        if (dz != null) dz[g * n + i] = dz[before * n + i] + (dz[after * n + i] - dz[before * n + i]) * t
                     }
                 }
             }
         }
-        return PoseTrack(timesUs, d, width, height, delegate, analysisMs)
+        // 4. Djupet hoppar från bild till bild, mest för händerna, och jämnas ut med medianen över sju bilder
+        if (dz != null) {
+            val frames = (0 until size).filter { present[it] }
+            val src = dz.copyOf()
+            for (i in 0 until n) for (k in frames.indices) {
+                val window = (maxOf(0, k - 3)..minOf(frames.lastIndex, k + 3)).map { src[frames[it] * n + i] }.sorted()
+                dz[frames[k] * n + i] = window[window.size / 2]
+            }
+        }
+        return PoseTrack(timesUs, d, width, height, delegate, analysisMs, dz)
     }
 
     /**
@@ -184,7 +207,9 @@ class PoseTrack(
         if (keep.isEmpty()) return null
         val d = FloatArray(keep.size * stride)
         keep.forEachIndexed { k, f -> data.copyInto(d, k * stride, f * stride, (f + 1) * stride) }
-        return PoseTrack(LongArray(keep.size) { timesUs[keep[it]] - offsetUs }, d, width, height, delegate)
+        val n = Landmark.COUNT
+        val dz = depth?.let { z -> FloatArray(keep.size * n).also { out -> keep.forEachIndexed { k, f -> z.copyInto(out, k * n, f * n, (f + 1) * n) } } }
+        return PoseTrack(LongArray(keep.size) { timesUs[keep[it]] - offsetUs }, d, width, height, delegate, depth = dz)
     }
 
     /** Kroppen vid tiden [timeUs], interpolerad mellan de två närmaste analyserade bilderna. */
@@ -205,7 +230,9 @@ class PoseTrack(
         val t = (timeUs - timesUs[a]).toFloat() / (timesUs[b] - timesUs[a])
         val out = FloatArray(stride)
         for (k in 0 until stride) out[k] = data[a * stride + k] * (1 - t) + data[b * stride + k] * t
-        return Pose(out)
+        val n = Landmark.COUNT
+        val z = depth?.let { dz -> FloatArray(n) { dz[a * n + it] * (1 - t) + dz[b * n + it] * t } }
+        return Pose(out, z)
     }
 
     /**
@@ -251,7 +278,8 @@ class PoseTrack(
 /** Analysen sparas i appens egna filer, så att den bara behöver göras en gång per sving. */
 object PoseStore {
     private const val MAGIC = 0x47535031 // "GSP1"
-    private const val VERSION = 2
+    /** Version 3 har djupet. Äldre analyser görs om när svingen öppnas, så att skelettet kan ritas med djup. */
+    private const val VERSION = 3
 
     private fun file(context: Context, clip: Clip) =
         File(File(context.filesDir, "pose").apply { mkdirs() }, "${clip.uri.lastPathSegment}.bin")
@@ -261,16 +289,16 @@ object PoseStore {
         if (!f.exists()) return null
         DataInputStream(f.inputStream().buffered()).use { s ->
             if (s.readInt() != MAGIC) return null
-            val version = s.readInt()
-            if (version !in 1..VERSION) return null
+            if (s.readInt() != VERSION) return null
             val width = s.readInt()
             val height = s.readInt()
             val delegate = s.readUTF()
-            val analysisMs = if (version >= 2) s.readInt() else 0
+            val analysisMs = s.readInt()
             val n = s.readInt()
             val times = LongArray(n) { s.readLong() }
             val data = FloatArray(n * Landmark.COUNT * 3) { s.readFloat() }
-            PoseTrack(times, data, width, height, delegate, analysisMs)
+            val depth = if (s.readBoolean()) FloatArray(n * Landmark.COUNT) { s.readFloat() } else null
+            PoseTrack(times, data, width, height, delegate, analysisMs, depth)
         }
     }.getOrNull()
 
@@ -291,6 +319,8 @@ object PoseStore {
             s.writeInt(track.size)
             for (t in track.timesUs) s.writeLong(t)
             for (v in track.data) s.writeFloat(v)
+            s.writeBoolean(track.depth != null)
+            track.depth?.forEach { s.writeFloat(it) }
         }
         tmp.renameTo(f)
     }

@@ -86,5 +86,7 @@ fun alignTo(b: PoseTrack, bAddress: Pose, a: PoseTrack, aAddress: Pose, map: Tim
         }
     }
     val times = LongArray(b.size) { map.bToA(b.timesUs[it]) }
-    return PoseTrack(times, d, a.width, a.height, b.delegate)
+    // Djupet är i bildbredder, och räknas om på samma sätt som x
+    val depth = b.depth?.let { z -> FloatArray(z.size) { z[it] * b.width * k / a.width } }
+    return PoseTrack(times, d, a.width, a.height, b.delegate, depth = depth)
 }

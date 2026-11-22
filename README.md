@@ -54,7 +54,7 @@ Filerna har verklig tid, 240 bilder per sekund. Andra spelare visar dem därför
 
 När du öppnar en sving första gången letar appen upp kroppen i 120 bilder per sekund. Det tar en stund, mest för långa klipp, så klipp gärna svingen först. Resultatet sparas, och nästa gång visas det direkt. Allt sker i telefonen, med Googles kroppsmodell MediaPipe Pose (*heavy*). Ingen video lämnar telefonen.
 
-- **Skelett.** Vänster sida är grön och höger blå. Den streckade gula linjen är ryggen, från höfternas mitt till axlarnas, och siffran nere till vänster är dess lutning från lodlinjen.
+- **Skelett.** Vänster sida är grön och höger blå. Den sida som är längst från kameran är mörkare och smalare och ligger bakom, så att det syns vad som är fram och bak. Den streckade gula linjen är ryggen, från höfternas mitt till axlarnas, och siffran nere till vänster är dess lutning från lodlinjen.
 - **Handbana.** Händernas väg genom svingen. Den svaga linjen är hela banan, och den starka den del som spelats hittills.
 - **Huvud.** Den streckade cirkeln är huvudets läge i klippets första bild, alltså uppställningen om klippet börjar där. Den gula pricken är huvudet nu.
 - **Rita.** Linje, vinkel och cirkel. Vinkeln visar gradtalet. Markeringarna sparas med svingen. **Ångra** tar bort den senaste, och **Rensa** alla.
@@ -66,6 +66,8 @@ Kroppsmodellen ser bara en platt bild. Appen rättar därför tre vanliga fel in
 - **Vänster och höger byter plats** mellan två bilder. De byts tillbaka.
 - **En handled tappas.** Den kan skymmas av den andra handen, eller bli suddig i nedsvingen. Den följer då den andra handleden, eftersom händerna sitter ihop i greppet. Vilken handled som stämmer avgörs i första hand av underarmen. En tappad handled hamnar vid armbågen, så att underarmen blir för kort, medan modellen ofta är lika säker på den som på den rätta.
 - **Korta luckor**, under 0,2 s, där en punkt är osäker, fylls i mellan de närmaste säkra bilderna.
+
+Kroppen vrider sig mer än en kvarts varv både i backswingen och i avslutet. Då byter vänster och höger sida plats i bilden fast de inte är förväxlade. Framifrån hamnar till exempel den gröna axeln till vänster om den blå i avslutet, och benen korsar varandra när det bakre knät kommer fram. I en platt figur ser det ut som en omöjlig vridning. Därför ritas skelettet med kroppsmodellens uppskattade djup. Varje kroppsdel jämförs med samma del på andra sidan, och den som är längre bort blir svagare och hamnar bakom. Djupet jämnas ut över sju bilder, eftersom det hoppar mest av allt, särskilt för händerna. Svingar som analyserades före 0.4.9 saknar djup och analyseras om när de öppnas.
 
 ## Svingrapporten
 
@@ -92,7 +94,7 @@ Felen rangordnas efter hur stora de är och hur grundläggande de är. Tryck på
 
 Centimetrarna räknas fram med benlängden, höft till fotled, som skala. Den antas vara 80 cm. Gränserna är uppskattade och en utgångspunkt, inte en sanning. De justeras när fler svingar har testats.
 
-**Dela mätdata** i rapporten sparar kroppspunkterna som en CSV-fil i Hämtade filer/Golfsvingen, utan video, för att kunna justera mätningarna på en dator.
+**Dela mätdata** i rapporten sparar kroppspunkterna, med djup, som en CSV-fil i Hämtade filer/Golfsvingen, utan video, för att kunna justera mätningarna på en dator.
 
 Analysen körs på grafikprocessorn. Fungerar inte den används processorn i stället, och det står vilken som användes överst till höger.
 

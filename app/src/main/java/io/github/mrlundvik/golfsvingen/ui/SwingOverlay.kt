@@ -263,30 +263,58 @@ fun SwingOverlay(
     }
 }
 
+/**
+ * Skelettet ritas med djup: varje kroppsdel jämförs med samma del på andra sidan, och den som är längre bort ritas
+ * först, smalare och svagare. Utan djup ser en kropp som vridit sig mer än en kvarts varv ut att ha vridit sig ett
+ * halvt, eftersom vänster och höger sida då byter plats i bilden fast de inte är förväxlade.
+ */
 private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost: Boolean = false, tint: Color? = null) {
-    for ((i, j) in Landmark.BONES) {
-        if (p.v(i) < 0.2f || p.v(j) < 0.2f) continue
-        val color = when {
-            tint != null -> tint.copy(alpha = 0.85f)
-            ghost -> Color.White.copy(alpha = 0.35f)
-            i % 2 == 1 && j % 2 == 1 -> LeftSide.copy(alpha = 0.9f)
-            i % 2 == 0 && j % 2 == 0 -> RightSide.copy(alpha = 0.9f)
-            else -> Color.White.copy(alpha = 0.9f)
-        }
-        drawLine(color, px(p.x(i), p.y(i)), px(p.x(j), p.y(j)), strokeWidth = if (ghost) 4f else 6f, cap = StrokeCap.Round)
-    }
-    if (ghost) return
-    if (tint != null) {
-        for (i in Landmark.JOINTS) if (p.v(i) >= 0.2f) drawCircle(tint, radius = 5f, center = px(p.x(i), p.y(i)))
-        return
-    }
-    for (i in Landmark.JOINTS) {
-        if (p.v(i) < 0.2f) continue
-        drawCircle(Color.White, radius = 7f, center = px(p.x(i), p.y(i)))
-    }
-    // Ryggen, från höfternas mitt till axlarnas mitt
     val hip = px((p.x(Landmark.HIP_L) + p.x(Landmark.HIP_R)) / 2, (p.y(Landmark.HIP_L) + p.y(Landmark.HIP_R)) / 2)
     val sh = px((p.x(Landmark.SHOULDER_L) + p.x(Landmark.SHOULDER_R)) / 2, (p.y(Landmark.SHOULDER_L) + p.y(Landmark.SHOULDER_R)) / 2)
+    // Djupet är i bildbredder och jämförs med bålens längd. En halv bål närmare än andra sidan räknas som helt framför
+    val unit = px(1f, 0f).x - px(0f, 0f).x
+    val torso = (sh - hip).getDistance().coerceAtLeast(1f)
+    fun other(i: Int) = if (i % 2 == 1) i + 1 else i - 1
+    fun nearness(own: Float, opposite: Float) = ((opposite - own) * unit / (0.5f * torso)).coerceIn(-1f, 1f)
+
+    // Ben och leder i en lista, längst bort först. En led ritas strax framför sina ben
+    class Part(val i: Int, val j: Int, val near: Float)
+    val parts = ArrayList<Part>()
+    for ((i, j) in Landmark.BONES) {
+        if (p.v(i) < 0.2f || p.v(j) < 0.2f) continue
+        // Axlarnas och höfternas tvärlinjer går mellan sidorna och ligger i mitten
+        val near = if (i % 2 != j % 2) 0f else nearness((p.z(i) + p.z(j)) / 2, (p.z(other(i)) + p.z(other(j))) / 2)
+        parts += Part(i, j, near)
+    }
+    if (!ghost) for (i in Landmark.JOINTS) if (p.v(i) >= 0.2f) parts += Part(i, -1, nearness(p.z(i), p.z(other(i))) + 0.01f)
+    parts.sortBy { it.near }
+
+    for (part in parts) {
+        val far = (-part.near).coerceIn(0f, 1f)
+        val close = part.near.coerceIn(0f, 1f)
+        val fade = 1f - 0.55f * far
+        val at = px(p.x(part.i), p.y(part.i))
+        if (part.j < 0) {
+            drawCircle(
+                (tint ?: Color.White).copy(alpha = fade),
+                radius = (if (tint != null) 5f else 7f) * (1f - 0.35f * far),
+                center = at,
+            )
+            continue
+        }
+        val (i, j) = part.i to part.j
+        val color = when {
+            tint != null -> tint.copy(alpha = 0.85f * fade)
+            ghost -> Color.White.copy(alpha = 0.35f * fade)
+            i % 2 == 1 && j % 2 == 1 -> LeftSide.copy(alpha = 0.9f * fade)
+            i % 2 == 0 && j % 2 == 0 -> RightSide.copy(alpha = 0.9f * fade)
+            else -> Color.White.copy(alpha = 0.9f * fade)
+        }
+        val width = if (ghost) 4f * (1f - 0.4f * far) else 6f * (1f - 0.4f * far) + 1.5f * close
+        drawLine(color, at, px(p.x(j), p.y(j)), strokeWidth = width, cap = StrokeCap.Round)
+    }
+    if (ghost || tint != null) return
+    // Ryggen, från höfternas mitt till axlarnas mitt
     drawLine(Sun, hip, sh, strokeWidth = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f)))
 }
 

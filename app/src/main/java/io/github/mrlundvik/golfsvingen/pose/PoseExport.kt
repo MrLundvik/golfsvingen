@@ -25,10 +25,11 @@ object PoseExport {
             ?: error("Filen kunde inte skapas")
         try {
             resolver.openOutputStream(uri)!!.bufferedWriter().use { w ->
-                w.write("# Golfsvingen mätdata. x och y är andelar av bildens bredd och höjd, v hur säkert punkten syns\n")
+                w.write("# Golfsvingen mätdata. x och y är andelar av bildens bredd och höjd, v hur säkert punkten syns, z djupet i bildbredder (mindre är närmare)\n")
                 w.write("# width=${raw.width} height=${raw.height} delegate=${raw.delegate} analysisMs=${raw.analysisMs}\n")
                 w.write("source,t_us")
                 for (i in 0 until Landmark.COUNT) w.write(",x$i,y$i,v$i")
+                if (raw.depth != null) for (i in 0 until Landmark.COUNT) w.write(",z$i")
                 w.write("\n")
                 fun rows(name: String, track: PoseTrack) {
                     val stride = Landmark.COUNT * 3
@@ -39,6 +40,10 @@ object PoseExport {
                         for (k in 0 until stride) {
                             w.write(",")
                             w.write(String.format(Locale.ROOT, "%.4f", track.data[f * stride + k]))
+                        }
+                        if (raw.depth != null) for (i in 0 until Landmark.COUNT) {
+                            w.write(",")
+                            w.write(String.format(Locale.ROOT, "%.4f", track.depth?.get(f * Landmark.COUNT + i) ?: 0f))
                         }
                         w.write("\n")
                     }

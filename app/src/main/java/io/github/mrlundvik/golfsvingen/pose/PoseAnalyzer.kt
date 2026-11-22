@@ -48,6 +48,7 @@ object PoseAnalyzer {
         val (landmarker, delegate) = createLandmarker(context)
         val times = ArrayList<Long>()
         val values = ArrayList<FloatArray>()
+        val depths = ArrayList<FloatArray>()
         var width = 0
         var height = 0
         var lastMs = -1L
@@ -63,16 +64,19 @@ object PoseAnalyzer {
                 val result = landmarker.detectForVideo(BitmapImageBuilder(bitmap).build(), ms)
                 val person = result.landmarks().firstOrNull()
                 val frame = FloatArray(Landmark.COUNT * 3)
+                val z = FloatArray(Landmark.COUNT)
                 if (person != null) {
                     for (i in 0 until minOf(Landmark.COUNT, person.size)) {
                         val lm = person[i]
                         frame[i * 3] = lm.x()
                         frame[i * 3 + 1] = lm.y()
                         frame[i * 3 + 2] = lm.visibility().orElse(1f).coerceIn(0.01f, 1f)
+                        z[i] = lm.z()
                     }
                 }
                 times += ptsUs
                 values += frame
+                depths += z
                 if (!confirmed && delegate == "GPU") {
                     confirmed = true
                     prefs(context).edit().putString(PREF_DELEGATE, "gpu").apply()
@@ -85,7 +89,9 @@ object PoseAnalyzer {
         require(times.isNotEmpty()) { "Inga bilder att analysera" }
         val data = FloatArray(values.size * Landmark.COUNT * 3)
         values.forEachIndexed { f, frame -> frame.copyInto(data, f * Landmark.COUNT * 3) }
-        PoseTrack(times.toLongArray(), data, width, height, delegate, (SystemClock.elapsedRealtime() - startedAt).toInt())
+        val depth = FloatArray(depths.size * Landmark.COUNT)
+        depths.forEachIndexed { f, z -> z.copyInto(depth, f * Landmark.COUNT) }
+        PoseTrack(times.toLongArray(), data, width, height, delegate, (SystemClock.elapsedRealtime() - startedAt).toInt(), depth)
     }
 
     private class Meta(val rotation: Int, val frames: Int, val durationMs: Double)
