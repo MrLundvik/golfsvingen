@@ -61,9 +61,10 @@ När du öppnar en sving första gången letar appen upp kroppen i 120 bilder pe
 
 Vinklarna mäts i bilden och beror därför på var kameran står. Jämför helst svingar som är filmade från samma ställe.
 
-Kroppsmodellen ser bara en platt bild. Appen rättar därför tre vanliga fel innan något ritas eller mäts:
+Kroppsmodellen ser bara en platt bild. Appen rättar därför fyra vanliga fel innan något ritas eller mäts:
 
-- **Vänster och höger byter plats** mellan två bilder. De byts tillbaka.
+- **Underkroppen tappas** en kort stund, oftast vid toppen när armarna är högt upp. Fötterna hoppar då in mellan de riktiga fötterna, och höfterna klumpas ihop. Fötterna står still genom svingen, så hoppar de iväg och kommer tillbaka inom 0,4 s räknas höfter, knän och fötter som osäkra där, och fylls i mellan bilderna före och efter.
+- **Vänster och höger byter plats.** Sidorna väljs för hela filmen på en gång, som den följd av byten som ger minst hopp mellan bilderna, där varje ombytt bild kostar lite. Före 0.4.10 jämfördes varje bild bara med den förra. Då kunde ett byte under ett tappat parti låsa sig, så att benen blev korsade resten av svingen.
 - **En handled tappas.** Den kan skymmas av den andra handen, eller bli suddig i nedsvingen. Den följer då den andra handleden, eftersom händerna sitter ihop i greppet. Vilken handled som stämmer avgörs i första hand av underarmen. En tappad handled hamnar vid armbågen, så att underarmen blir för kort, medan modellen ofta är lika säker på den som på den rätta.
 - **Korta luckor**, under 0,2 s, där en punkt är osäker, fylls i mellan de närmaste säkra bilderna.
 

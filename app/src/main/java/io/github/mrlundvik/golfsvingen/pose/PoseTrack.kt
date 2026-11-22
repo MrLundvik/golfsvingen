@@ -9,6 +9,14 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
 
+/** Vad en ombytt bild kostar i rättningen av vänster och höger, i andelar av bildens storlek. */
+private const val SWAP_COST = 0.02f
+
+/** Fötter längre än så här från sin plats, i benlängder, räknas som tappade. */
+private const val LOST_FEET = 0.1f
+private const val LOST_MAX_US = 400_000L
+private const val LOST_JOIN_US = 60_000L
+
 /** MediaPipes 33 kroppspunkter. Udda nummer är vänster sida, jämna höger. */
 object Landmark {
     const val COUNT = 33
@@ -82,9 +90,9 @@ class PoseTrack(
     fun poseAt(frame: Int) = pose(frame)
 
     /**
-     * Rättar de vanligaste felen från kroppsmodellen, som bara ser en platt bild:
-     * vänster och höger som byter plats, en handled som skyms av den andra handen,
-     * och korta luckor där modellen är osäker. Rådatan i cachen lämnas orörd.
+     * Rättar de vanligaste felen från kroppsmodellen, som bara ser en platt bild: underkroppen som tappas en kort
+     * stund, vänster och höger som byter plats, en handled som skyms av den andra handen, och korta luckor där
+     * modellen är osäker. Rådatan i cachen lämnas orörd.
      */
     fun cleaned(): PoseTrack {
         val d = data.copyOf()
@@ -103,27 +111,90 @@ class PoseTrack(
             hypot((x(f, i) - x(g, j)) * width, (y(f, i) - y(g, j)) * height) / scale
         val present = BooleanArray(size) { f -> (0 until Landmark.COUNT).any { v(f, it) > 0f } }
 
-        // 1. Vänster och höger: byt tillbaka en kroppsdel om den passar mycket bättre ombytt mot förra bilden
-        var prev = -1
-        for (f in 0 until size) {
-            if (!present[f]) continue
-            if (prev >= 0) for (group in Landmark.SIDE_GROUPS) {
-                var same = 0f
-                var swapped = 0f
-                for ((a, b) in group) {
-                    same += dist(f, a, prev, a) + dist(f, b, prev, b)
-                    swapped += dist(f, a, prev, b) + dist(f, b, prev, a)
-                }
-                if (same > 0.02f && swapped < 0.5f * same) {
-                    for ((a, b) in group) {
-                        val ax = x(f, a); val ay = y(f, a); val av = v(f, a)
-                        set(f, a, x(f, b), y(f, b), v(f, b))
-                        set(f, b, ax, ay, av)
-                        if (dz != null) dz[f * n + a] = dz[f * n + b].also { dz[f * n + b] = dz[f * n + a] }
-                    }
+        val frames = (0 until size).filter { present[it] }
+        fun swap(f: Int, a: Int, b: Int) {
+            val ax = x(f, a); val ay = y(f, a); val av = v(f, a)
+            set(f, a, x(f, b), y(f, b), v(f, b))
+            set(f, b, ax, ay, av)
+            if (dz != null) dz[f * n + a] = dz[f * n + b].also { dz[f * n + b] = dz[f * n + a] }
+        }
+
+        // 1a. Fötterna står still genom svingen. Hoppar de iväg och kommer tillbaka inom 0,4 s har modellen tappat
+        //     underkroppen, oftast vid toppen. Höfter, knän och fötter räknas då som osäkra och fylls i i steg 3
+        val lost = BooleanArray(size)
+        if (frames.size > 2) {
+            fun foot(f: Int, ankle: Int) = floatArrayOf(
+                (x(f, ankle) + x(f, ankle + 2) + x(f, ankle + 4)) / 3 * width / scale,
+                (y(f, ankle) + y(f, ankle + 2) + y(f, ankle + 4)) / 3 * height / scale,
+            )
+            fun gap(p: FloatArray, q: FloatArray) = hypot(p[0] - q[0], p[1] - q[1])
+            val legs = frames.map { f ->
+                hypot(
+                    ((x(f, Landmark.HIP_L) + x(f, Landmark.HIP_R)) - (x(f, 27) + x(f, 28))) / 2 * width,
+                    ((y(f, Landmark.HIP_L) + y(f, Landmark.HIP_R)) - (y(f, 27) + y(f, 28))) / 2 * height,
+                ) / scale
+            }.sorted()
+            val tol = LOST_FEET * legs[legs.size / 2]
+            var home: Pair<FloatArray, FloatArray>? = null
+            val away = ArrayList<Int>()
+            for (f in frames) {
+                val l = foot(f, 27)
+                val r = foot(f, 28)
+                val h = home
+                if (h == null) { home = l to r; continue }
+                // Fötternas namn kan vara ombytta, så båda sätten att para ihop dem prövas
+                val off = minOf(gap(l, h.first) + gap(r, h.second), gap(l, h.second) + gap(r, h.first)) / 2
+                if (off > tol) {
+                    away += f
+                    // Borta längre än så är en riktig rörelse, som bakre foten i avslutet
+                    if (timesUs[away.last()] - timesUs[away.first()] > LOST_MAX_US) { away.clear(); home = l to r }
+                } else {
+                    for (g in away) lost[g] = true
+                    away.clear()
+                    home = l to r
                 }
             }
-            prev = f
+            // Två tappade partier tätt efter varandra är samma fel, där fötterna råkat hamna rätt däremellan
+            var last = -1
+            for (f in frames) if (lost[f]) {
+                if (last >= 0 && timesUs[f] - timesUs[last] <= LOST_JOIN_US) for (g in last + 1 until f) lost[g] = present[g]
+                last = f
+            }
+            for (f in frames) if (lost[f]) for (i in Landmark.HIP_L until Landmark.COUNT) d[f * stride + i * 3 + 2] = 0.1f
+        }
+
+        // 1b. Vänster och höger väljs för hela filmen på en gång, som den följd av byten som ger minst hopp mellan
+        //     bilderna, där varje ombytt bild kostar lite. Förut jämfördes varje bild med den förra, och då kunde ett
+        //     byte under ett tappat parti låsa sig och lämna benen korsade resten av svingen
+        for ((g, group) in Landmark.SIDE_GROUPS.withIndex()) {
+            val fs = if (g == 1) frames.filter { !lost[it] } else frames
+            if (fs.size < 2) continue
+            fun jump(fp: Int, fc: Int, crossed: Boolean): Float {
+                var total = 0f
+                for ((a, b) in group) {
+                    val pa = if (crossed) b else a
+                    val pb = if (crossed) a else b
+                    total += minOf(v(fp, pa), v(fc, a)) * dist(fc, a, fp, pa) + minOf(v(fp, pb), v(fc, b)) * dist(fc, b, fp, pb)
+                }
+                return total
+            }
+            val back = Array(fs.size) { IntArray(2) }
+            var keep = 0f
+            var swapped = SWAP_COST
+            for (k in 1 until fs.size) {
+                val same = jump(fs[k - 1], fs[k], false)
+                val crossed = jump(fs[k - 1], fs[k], true)
+                back[k][0] = if (keep + same <= swapped + crossed) 0 else 1
+                back[k][1] = if (keep + crossed <= swapped + same) 0 else 1
+                val nextKeep = minOf(keep + same, swapped + crossed)
+                swapped = minOf(keep + crossed, swapped + same) + SWAP_COST
+                keep = nextKeep
+            }
+            var state = if (keep <= swapped) 0 else 1
+            for (k in fs.lastIndex downTo 0) {
+                if (state == 1) for ((a, b) in group) swap(fs[k], a, b)
+                state = back[k][state]
+            }
         }
 
         // 2. Händerna sitter ihop i greppet. Är en handled osäker, eller orimligt långt från den andra, följer den den
