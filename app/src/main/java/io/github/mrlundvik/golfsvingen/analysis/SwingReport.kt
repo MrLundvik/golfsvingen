@@ -81,6 +81,12 @@ object SwingReport {
     private const val DOWN_SHARE = 0.2f
     /** En längre paus än så här vid toppen räknas som ett fel. */
     private const val LONG_PAUSE_S = 0.3f
+
+    /** Starten bakifrån letas i djupet inom så lång tid före starten i bilden, i mikrosekunder. */
+    private const val DEPTH_WINDOW_US = 600_000L
+    /** Händerna måste ha rört sig så här mycket i djupled, i benlängder, för att starten ska flyttas. */
+    private const val DEPTH_MOVE = 0.3f
+    private const val DEPTH_STEP = 0.1f
     private val SV = Locale("sv", "SE")
 
     fun build(track: PoseTrack, viewOverride: View?): Report? {
@@ -152,6 +158,21 @@ object SwingReport {
         val still = maxOf(STILL, START_SHARE * peak)
         var start = fastest
         while (start > 2 && !(speed[start] < still && speed[start - 1] < still && speed[start - 2] < still)) start--
+        // Bakifrån rör sig händerna först mot kameran, vilket knappt syns i bilden men i djupet. Inom 0,6 s före
+        // starten i bilden letas var händerna senast var längst ifrån där de hamnar, och starten läggs där de flyttat
+        // sig en tiondels benlängd därifrån. Bara om de rört sig mer än tre tiondelar, så att framifrån inte påverkas
+        if (track.depth != null && start > 0) {
+            val hz = FloatArray(n) { (poses[it].z(Landmark.WRIST_L) + poses[it].z(Landmark.WRIST_R)) / 2 * w / leg }
+            var k0 = start
+            while (k0 > 0 && times[start] - times[k0 - 1] <= DEPTH_WINDOW_US) k0--
+            val dir = if (hz[start] >= hz[k0]) 1f else -1f
+            val far = (k0..start).minBy { dir * hz[it] }
+            if ((hz[start] - hz[far]) * dir > DEPTH_MOVE) {
+                var s = far
+                while (s < start && (hz[s] - hz[far]) * dir < DEPTH_STEP) s++
+                start = s
+            }
+        }
         if (!(start < top && top < impact)) return null
         // Nedsvingen räknas från där händerna kommer upp i fart. Tiden dessförinnan är pausen vid toppen
         val fastestDown = (top..impact).maxBy { speed[it] }

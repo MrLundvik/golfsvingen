@@ -89,7 +89,7 @@ Felen som mäts beror på var kameran står. Appen gissar det från bilden, och 
 | Bakifrån | Ryggvinkeln i träffen | mer än 10° mer upprätt än i uppställningen |
 | Bakifrån | Händerna i nedsvingen | mer än 4 cm utanför backswingen (över toppen) |
 
-Tempot räknas från att händerna börjar röra sig till toppen, och från att de kommer upp i fart nedåt till träffen. Tiden däremellan visas som tid vid toppen, så att en paus inte ser ut som en långsam nedsving.
+Tempot räknas från att händerna börjar röra sig till toppen, och från att de kommer upp i fart nedåt till träffen. Tiden däremellan visas som tid vid toppen, så att en paus inte ser ut som en långsam nedsving. Bakifrån rör sig händerna först mot kameran, vilket knappt syns i bilden. Där hittas starten i stället med djupet, annars blev backswingen 0,1–0,3 s för kort och tempot för lågt.
 
 Felen rangordnas efter hur stora de är och hur grundläggande de är. Tryck på ett fel för att läsa vad det innebär, hur det ska se ut och vilka övningar som hjälper, med länkar till filmer. **Visa** hoppar till rätt bild och ritar referenslinjer, med uppställningen som en vit skugga så att det syns vad som rört sig. Rapporten krymper då till den mätningen, så att videon får plats. **◀ Förra** och **Nästa ▶** går mellan mätningarna, chipsen väljer vad som ritas, och **‹ Rapporten** visar hela rapporten igen.
 
