@@ -425,6 +425,22 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit, onCompa
                     }
                 },
             )
+            // Bilden när man stegar, tills spelaren hunnit visa den själv
+            StepFrame(
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = zoom
+                    scaleY = zoom
+                    translationX = pan.x
+                    translationY = pan.y
+                    transformOrigin = TransformOrigin(0f, 0f)
+                },
+                player = player,
+                uri = clip.uri,
+                positionMs = position,
+                paused = !playing,
+                fps = fps,
+                window = 36,
+            )
             SwingOverlay(
                 modifier = Modifier.fillMaxSize(),
                 aspect = aspect,

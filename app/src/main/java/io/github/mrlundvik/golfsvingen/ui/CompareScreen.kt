@@ -1,6 +1,7 @@
 package io.github.mrlundvik.golfsvingen.ui
 
 import android.content.Context
+import android.net.Uri
 import android.media.MediaMetadataRetriever
 import android.view.LayoutInflater
 import androidx.annotation.OptIn
@@ -311,12 +312,18 @@ fun CompareScreen(a: Clip, b: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) 
             if (overlay) {
                 VideoPane(
                     Modifier.fillMaxSize(), playerA, infoA.aspect, cleanA, posA, showSkeleton, showPath, aligned,
-                    label("A", a) + "  ·  B i lila", onLabel = { onOpen(a) },
+                    label("A", a) + "  ·  B i lila", onLabel = { onOpen(a) }, uri = a.uri, paused = !playing, fps = infoA.fps,
                 )
             } else {
                 Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    VideoPane(Modifier.weight(1f).fillMaxSize(), playerA, infoA.aspect, cleanA, posA, showSkeleton, showPath, null, label("A", a), onLabel = { onOpen(a) })
-                    VideoPane(Modifier.weight(1f).fillMaxSize(), playerB, infoB.aspect, cleanB, posB, showSkeleton, showPath, null, label("B", b), onLabel = { onOpen(b) })
+                    VideoPane(
+                        Modifier.weight(1f).fillMaxSize(), playerA, infoA.aspect, cleanA, posA, showSkeleton, showPath, null,
+                        label("A", a), onLabel = { onOpen(a) }, uri = a.uri, paused = !playing, fps = infoA.fps,
+                    )
+                    VideoPane(
+                        Modifier.weight(1f).fillMaxSize(), playerB, infoB.aspect, cleanB, posB, showSkeleton, showPath, null,
+                        label("B", b), onLabel = { onOpen(b) }, uri = b.uri, paused = !playing, fps = infoB.fps,
+                    )
                 }
             }
         }
@@ -380,6 +387,9 @@ private fun VideoPane(
     other: PoseTrack?,
     label: String,
     onLabel: () -> Unit,
+    uri: Uri,
+    paused: Boolean,
+    fps: Double,
 ) {
     Box(modifier.clipToBounds()) {
         AndroidView(
@@ -388,6 +398,8 @@ private fun VideoPane(
             update = { it.player = player },
             onRelease = { it.player = null },
         )
+        // Två filmer på en gång, så färre bilder i minnet per film
+        StepFrame(Modifier.fillMaxSize(), player, uri, positionMs, paused, fps, window = 24)
         SwingOverlay(
             modifier = Modifier.fillMaxSize(),
             aspect = aspect,

@@ -21,7 +21,8 @@ object FrameDecoder {
 
     /**
      * Anropar [onFrame] med var [stride]:e bild. Bitmappen återanvänds, så den får inte sparas.
-     * [check] anropas mellan bilderna och kan kasta för att avbryta.
+     * [check] anropas mellan bilderna och kan kasta för att avbryta. Med [fromUs] och [toUs] avkodas bara det
+     * avsnittet, från nyckelbilden före, och [want] kan hoppa över bilder som inte behövs utan att räkna om dem.
      */
     fun decode(
         context: Context,
@@ -29,6 +30,9 @@ object FrameDecoder {
         rotation: Int,
         stride: Int,
         check: () -> Unit,
+        fromUs: Long = 0L,
+        toUs: Long = Long.MAX_VALUE,
+        want: (ptsUs: Long) -> Boolean = { true },
         onFrame: (bitmap: Bitmap, ptsUs: Long) -> Unit,
     ) {
         val extractor = MediaExtractor()
@@ -40,6 +44,7 @@ object FrameDecoder {
             } ?: throw IllegalStateException("Filen har ingen video")
             val format = extractor.getTrackFormat(track)
             extractor.selectTrack(track)
+            if (fromUs > 0) extractor.seekTo(fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
             // Inte i realtid: avkoda så fort det går
             format.setInteger(MediaFormat.KEY_PRIORITY, 1)
@@ -71,17 +76,19 @@ object FrameDecoder {
                 val outIndex = dec.dequeueOutputBuffer(info, 10_000)
                 if (outIndex >= 0) {
                     val end = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
-                    if (info.size > 0 || !end) {
-                        if (index % stride == 0) {
+                    val pts = info.presentationTimeUs
+                    val past = pts > toUs
+                    if (!past && (info.size > 0 || !end)) {
+                        if (pts >= fromUs && index % stride == 0 && want(pts)) {
                             val image = dec.getOutputImage(outIndex)
                                 ?: throw IllegalStateException("Videoavkodaren lämnar inga bilder att analysera")
                             val bitmap = image.use { converter.convert(it) }
-                            onFrame(bitmap, info.presentationTimeUs)
+                            onFrame(bitmap, pts)
                         }
                         index++
                     }
                     dec.releaseOutputBuffer(outIndex, false)
-                    if (end) break
+                    if (end || past) break
                 }
             }
         } finally {
