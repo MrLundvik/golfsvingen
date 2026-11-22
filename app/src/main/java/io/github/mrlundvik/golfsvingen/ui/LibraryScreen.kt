@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,6 +59,7 @@ import androidx.core.content.ContextCompat
 import io.github.mrlundvik.golfsvingen.store.Clip
 import io.github.mrlundvik.golfsvingen.store.ClipStore
 import io.github.mrlundvik.golfsvingen.store.VideoImport
+import io.github.mrlundvik.golfsvingen.store.History
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -73,7 +75,13 @@ private val readPermission =
  * Listan med svingar. Med [pickFor] väljer man i stället en sving att jämföra med, och referenssvingen står först.
  */
 @Composable
-fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit, onCompare: (Clip, Clip) -> Unit, pickFor: Clip? = null) {
+fun LibraryScreen(
+    onOpen: (Clip) -> Unit,
+    onBack: () -> Unit,
+    onCompare: (Clip, Clip) -> Unit,
+    pickFor: Clip? = null,
+    onProgress: () -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var clips by remember { mutableStateOf<List<Clip>>(emptyList()) }
@@ -101,6 +109,7 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit, onCompare: (Clip, 
                 for (c in gone) {
                     runCatching { PoseStore.delete(context, c) }
                     runCatching { MarkStore.delete(context, c) }
+                    runCatching { History.delete(context, c.uri) }
                 }
             }
             val text = if (gone.size == 1) "Svingen ligger i papperskorgen i 30 dagar" else "${gone.size} svingar ligger i papperskorgen i 30 dagar"
@@ -178,9 +187,11 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit, onCompare: (Clip, 
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text("‹ Kamera") }
                 Text("Mina svingar", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 8.dp))
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { importLauncher.launch("video/*") }, enabled = !importing) {
-                    Text(if (importing) "Hämtar…" else "Importera")
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onProgress) { Text("Utveckling") }
+                OutlinedButton(onClick = { importLauncher.launch("video/*") }, enabled = !importing) {
+                    Text(if (importing) "Hämtar…" else "Importera film")
                 }
             }
             converted?.let { done ->

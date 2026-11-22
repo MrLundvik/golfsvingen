@@ -88,6 +88,7 @@ import io.github.mrlundvik.golfsvingen.pose.PoseAnalyzer
 import io.github.mrlundvik.golfsvingen.pose.PoseExport
 import io.github.mrlundvik.golfsvingen.pose.PoseStore
 import io.github.mrlundvik.golfsvingen.pose.PoseTrack
+import io.github.mrlundvik.golfsvingen.store.History
 import io.github.mrlundvik.golfsvingen.store.Clip
 import io.github.mrlundvik.golfsvingen.store.ClipStore
 import io.github.mrlundvik.golfsvingen.store.Reference
@@ -189,6 +190,13 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit, onCompa
     val clean = remember(track) { track?.cleaned() }
     var viewOverride by remember { mutableStateOf<View?>(null) }
     val report = remember(clean, viewOverride) { clean?.let { runCatching { SwingReport.build(it, viewOverride) }.getOrNull() } }
+    // Rapporten sparas för utvecklingen över tid
+    LaunchedEffect(clean, report) {
+        if (clean == null) return@LaunchedEffect
+        withContext(Dispatchers.IO) {
+            runCatching { if (report != null) History.save(context, clip, report) else History.saveFailed(context, clip) }
+        }
+    }
     var reportOpen by remember { mutableStateOf(false) }
     var focus by remember { mutableStateOf<Metric?>(null) }
     LaunchedEffect(report) { focus = null }
@@ -274,6 +282,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit, onCompa
         if (it.resultCode == Activity.RESULT_OK) {
             runCatching { PoseStore.delete(context, clip) }
             runCatching { MarkStore.delete(context, clip) }
+            runCatching { History.delete(context, clip.uri) }
             Toast.makeText(context, "Svingen ligger i papperskorgen i 30 dagar", Toast.LENGTH_SHORT).show()
             onBack()
         }

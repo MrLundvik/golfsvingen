@@ -20,6 +20,7 @@ import io.github.mrlundvik.golfsvingen.ui.CompareScreen
 import io.github.mrlundvik.golfsvingen.ui.GolfTheme
 import io.github.mrlundvik.golfsvingen.ui.LibraryScreen
 import io.github.mrlundvik.golfsvingen.ui.PlayerScreen
+import io.github.mrlundvik.golfsvingen.ui.ProgressScreen
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -58,6 +59,7 @@ sealed interface Screen {
     /** Välj en sving att jämföra [first] med. */
     data class Pick(val first: Clip) : Screen
     data class Compare(val a: Clip, val b: Clip) : Screen
+    data object Progress : Screen
 }
 
 @Composable
@@ -69,6 +71,7 @@ fun App(activity: MainActivity) {
             is Screen.Player -> Screen.Library
             is Screen.Pick -> Screen.Player(s.first)
             is Screen.Compare -> Screen.Library
+            Screen.Progress -> Screen.Library
             else -> Screen.Camera
         }
     }
@@ -78,7 +81,9 @@ fun App(activity: MainActivity) {
             onOpen = { screen = Screen.Player(it) },
             onBack = { screen = Screen.Camera },
             onCompare = { a, b -> screen = Screen.Compare(a, b) },
+            onProgress = { screen = Screen.Progress },
         )
+        Screen.Progress -> ProgressScreen(onBack = { screen = Screen.Library }, onOpen = { screen = Screen.Player(it) })
         is Screen.Pick -> LibraryScreen(
             onOpen = {},
             onBack = { screen = Screen.Player(s.first) },

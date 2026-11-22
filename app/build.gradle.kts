@@ -6,7 +6,7 @@ plugins {
 
 val runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
 // Samma version står i .github/workflows/build.yml
-val appVersion = "0.4"
+val appVersion = "0.6"
 val keystoreFile = file("golfsvingen.p12")
 
 android {

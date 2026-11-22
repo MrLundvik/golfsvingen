@@ -47,6 +47,12 @@ class Metric(
     val timeUs: Long,
     val guide: Guide,
     val advice: Advice?,
+    /** Mätvärdet som tal, för utvecklingen över tid. Null om det inte kunde mätas. */
+    val number: Float? = null,
+    /** Enheten för [number], som den skrivs i diagrammet. */
+    val unit: String = "",
+    /** Där [number] räknas som bra. */
+    val good: ClosedFloatingPointRange<Float>? = null,
 ) {
     val title get() = if (status == Status.FAULT && advice != null) advice.faultTitle else name
 }
@@ -196,6 +202,11 @@ object SwingReport {
         fun f0(v: Float) = String.format(SV, "%.0f", v)
         fun f1(v: Float) = String.format(SV, "%.1f", v)
         fun f2(v: Float) = String.format(SV, "%.2f", v)
+        // Mätvärdena som tal, med enhet och vad som är bra, för utvecklingen över tid
+        val numbers = HashMap<String, Triple<Float, String, ClosedFloatingPointRange<Float>>>()
+        fun num(id: String, value: Float, unit: String, good: ClosedFloatingPointRange<Float>) {
+            numbers[id] = Triple(value, unit, good)
+        }
         fun metric(
             id: String, name: String, value: String, goal: String, fault: Boolean, severity: Float, weight: Float,
             frame: Int, guide: Guide, advice: Advice?,
@@ -207,6 +218,7 @@ object SwingReport {
         // Tempo, från båda hållen. Pausen vid toppen räknas för sig, så att den inte ser ut som en långsam nedsving
         val ratio = backswingS / downswingS
         val longPause = pauseS > LONG_PAUSE_S
+        num("tempo", ratio, ": 1", 2.2f..99f)
         metrics += metric(
             "tempo", "Tempo",
             "${f1(ratio)} : 1  (${f2(backswingS)} s upp, ${f2(pauseS)} s vid toppen, ${f2(downswingS)} s ned)",
@@ -222,6 +234,7 @@ object SwingReport {
         val drop = cm(hImp.y - h0.y)
         val headDown = drop > 8f
         val headUp = drop < -5f
+        num("head-height", drop, "cm ned", -5f..8f)
         metrics += metric(
             "head-height", "Huvudets höjd i träffen",
             if (drop >= 0) "${f0(drop)} cm ned" else "${f0(-drop)} cm upp",
@@ -252,6 +265,7 @@ object SwingReport {
             val hipTop = hipMid(pTop)
             val sway = cm((hipTop.x - hip0.x) * -target)
             val swayFault = sway > 8f
+            num("sway", sway, "cm bort från målet", -99f..8f)
             metrics += metric(
                 "sway", "Höften vid toppen",
                 if (sway >= 0) "${f0(sway)} cm bort från målet" else "${f0(-sway)} cm mot målet",
@@ -271,6 +285,7 @@ object SwingReport {
             // Huvudet i sidled i träffen
             val slide = cm((hImp.x - h0.x) * target)
             val slideFault = slide > 5f
+            num("head-slide", slide, "cm mot målet", -99f..5f)
             metrics += metric(
                 "head-slide", "Huvudet i träffen",
                 if (slide >= 0) "${f0(slide)} cm mot målet" else "${f0(-slide)} cm bakom",
@@ -291,6 +306,7 @@ object SwingReport {
             val spineTop = shoulderMid(pTop) - hipMid(pTop)
             val tilt = Math.toDegrees(atan2((spineTop.x * -target).toDouble(), (-spineTop.y).toDouble())).toFloat()
             val reverse = tilt < -2f
+            num("reverse-pivot", tilt, "° bort från målet", -2f..99f)
             metrics += metric(
                 "reverse-pivot", "Ryggen vid toppen",
                 if (tilt >= 0) "${f0(tilt)}° bort från målet" else "${f0(-tilt)}° mot målet",
@@ -316,6 +332,7 @@ object SwingReport {
                 val weightFault = share < 0.6f
                 val ankleY = pt(p0, leadAnkle).y
                 val hipY = hipMid(pFin).y
+                num("weight", share * 100f, "% mot främre foten", 60f..100f)
                 metrics += metric(
                     "weight", "Vikten i avslutet",
                     "${(share * 100).roundToInt()} % mot främre foten",
@@ -343,6 +360,7 @@ object SwingReport {
             if (pTop.v(lead) > 0.5f && pTop.v(elbow) > 0.5f && pTop.v(wrist) > 0.5f) {
                 val armAngle = angle(pt(pTop, lead), pt(pTop, elbow), pt(pTop, wrist))
                 val bent = armAngle < 140f
+                num("lead-arm", armAngle, "°", 140f..180f)
                 metrics += metric(
                     "lead-arm", "Ledarmen vid toppen", "${f0(armAngle)}°", "Bra: minst 140°",
                     bent, (140f - armAngle) / 30f, 0.6f, top,
@@ -364,6 +382,7 @@ object SwingReport {
             val hipImp = hipMid(pImp)
             val toBall = cm((hipImp.x - hip0.x) * ball)
             val eeFault = toBall > 5f
+            num("early-extension", toBall, "cm mot bollen", -99f..5f)
             metrics += metric(
                 "early-extension", "Höften i träffen",
                 if (toBall >= 0) "${f0(toBall)} cm mot bollen" else "${f0(-toBall)} cm bort från bollen",
@@ -390,6 +409,7 @@ object SwingReport {
             val loss = tilt0 - tiltImp
             val standUp = loss > 10f
             val spine0 = shoulderMid(p0) - hipMid(p0)
+            num("spine-angle", loss, "° mer upprätt", -99f..10f)
             metrics += metric(
                 "spine-angle", "Ryggvinkeln i träffen",
                 "${f0(tilt0)}° → ${f0(tiltImp)}°",
@@ -417,6 +437,7 @@ object SwingReport {
             if (up != null && down != null) {
                 val outside = cm((down.x - up.x) * ball)
                 val ottFault = outside > 4f
+                num("over-the-top", outside, "cm utanför", -99f..4f)
                 metrics += metric(
                     "over-the-top", "Händerna i nedsvingen",
                     if (outside >= 0) "${f0(outside)} cm utanför backswingen" else "${f0(-outside)} cm innanför backswingen",
@@ -446,7 +467,12 @@ object SwingReport {
             Phase("Träffen", times[impact]),
             Phase("Avslut", times[finish]),
         )
-        return Report(view, guessed, phases, backswingS, downswingS, metrics)
+        val numbered = metrics.map { m ->
+            numbers[m.id]?.takeIf { m.status != Status.UNKNOWN }?.let { (v, unit, good) ->
+                Metric(m.id, m.name, m.value, m.goal, m.status, m.score, m.timeUs, m.guide, m.advice, v, unit, good)
+            } ?: m
+        }
+        return Report(view, guessed, phases, backswingS, downswingS, numbered)
     }
 
     private fun unknown(id: String, name: String, timeUs: Long) =

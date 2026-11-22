@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.mrlundvik.golfsvingen.analysis.Advice
 import io.github.mrlundvik.golfsvingen.analysis.FaultColor
 import io.github.mrlundvik.golfsvingen.analysis.GoodColor
 import io.github.mrlundvik.golfsvingen.analysis.Metric
@@ -134,7 +135,6 @@ fun ReportPanel(
 
 @Composable
 private fun MetricCard(m: Metric, rank: Int?, focused: Boolean, onShow: (Metric) -> Unit) {
-    val context = LocalContext.current
     var open by remember { mutableStateOf(false) }
     val color = when (m.status) {
         Status.FAULT -> FaultColor
@@ -166,38 +166,41 @@ private fun MetricCard(m: Metric, rank: Int?, focused: Boolean, onShow: (Metric)
         }
         if (open) {
             if (m.goal.isNotEmpty()) Text(m.goal, fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
-            val advice = m.advice
-            if (advice != null) {
-                if (m.status == Status.FAULT) Paragraph(advice.why)
-                Paragraph("Så ska det se ut: " + advice.ideal)
-                advice.caveat?.let { Paragraph(it, dim = true) }
-                if (m.status == Status.FAULT) {
-                    Text("Övningar", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                    for (d in advice.drills) {
-                        Column(Modifier.padding(top = 6.dp)) {
-                            Text(d.name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Text(d.how, fontSize = 13.sp, color = Color.White.copy(alpha = 0.8f))
-                            d.search?.let { q ->
-                                Text(
-                                    "Se filmer om övningen ↗",
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .padding(top = 2.dp)
-                                        .clickable {
-                                            val url = "https://www.youtube.com/results?search_query=" + Uri.encode(q)
-                                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                                        },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            m.advice?.let { AdviceDetails(it, fault = m.status == Status.FAULT) }
             Spacer(Modifier.padding(top = 4.dp))
             OutlinedButton(onClick = { onShow(m) }, modifier = Modifier.padding(top = 6.dp)) { Text("Visa i videon") }
         } else if (m.status == Status.FAULT) {
             Text("Tryck för förklaring och övningar", fontSize = 11.sp, color = Color.White.copy(alpha = 0.45f))
+        }
+    }
+}
+
+/** Förklaringen till ett råd: vad felet innebär, hur det ska se ut, och övningar med länk till filmer. */
+@Composable
+fun AdviceDetails(advice: Advice, fault: Boolean) {
+    val context = LocalContext.current
+    if (fault) Paragraph(advice.why)
+    Paragraph("Så ska det se ut: " + advice.ideal)
+    advice.caveat?.let { Paragraph(it, dim = true) }
+    if (!fault) return
+    Text("Övningar", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+    for (d in advice.drills) {
+        Column(Modifier.padding(top = 6.dp)) {
+            Text(d.name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(d.how, fontSize = 13.sp, color = Color.White.copy(alpha = 0.8f))
+            d.search?.let { q ->
+                Text(
+                    "Se filmer om övningen ↗",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .clickable {
+                            val url = "https://www.youtube.com/results?search_query=" + Uri.encode(q)
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                        },
+                )
+            }
         }
     }
 }

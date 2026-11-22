@@ -52,6 +52,18 @@ Med båda videorna i 1× fart kan telefonen behöva hoppa över bilder. I slow m
 
 Filerna har verklig tid, 240 bilder per sekund. Andra spelare visar dem därför i normal fart.
 
+## Utvecklingen över tid
+
+**Utveckling** i Mina svingar visar hur svingen förändras.
+
+- **Att träna på** är de fel som återkommer i de tio senaste svingarna: i minst två av dem, och i minst tre av tio av dem där felet kunde mätas. De rangordnas efter hur ofta de kommer och hur allvarliga de är, och högst tre visas, med förklaring och övningar.
+- **Mätningarna över tid** har en kurva per mätning, med en punkt per sving och äldst till vänster. Fylld punkt är bra och ring är fel, och det gröna fältet är målet. Under kurvan står om de senaste svingarna ligger närmare målet än de förra. Tryck på en punkt för att se datum och värde, och öppna svingen.
+- **Framifrån och bakifrån visas var för sig**, eftersom de mäter olika saker.
+
+Rapporten sparas när en sving analyseras. Svingar som inte är analyserade, till exempel från före 0.6, kan analyseras alla på en gång därifrån, ungefär en halv minut per sving.
+
+**Varför 0.5 utgick.** Planen var att mäta hur mycket axlarna och höfterna vrider sig, och i vilken ordning höfter, axlar, armar och händer blir snabbast i nedsvingen. Med åtta svingar visade sig kroppsmodellens djup inte räcka. Samma spelare fick 55–65° axelvridning framifrån och 160–175° bakifrån, och vid toppen flyttar modellen axelpunkterna när armarna passerar. I nedsvingen blev höfterna snabbast först efter träffen, med upp till 2 000°/s mot ungefär 500–900 i verkligheten. Det blev inte bättre med varje bild analyserad för sig. Det skulle ha gett fel som inte finns, så det får vänta på en bättre kroppsmodell.
+
 ## Analysen
 
 När du öppnar en sving första gången letar appen upp kroppen i 120 bilder per sekund. Det tar en stund, mest för långa klipp, så klipp gärna svingen först. Resultatet sparas, och nästa gång visas det direkt. Allt sker i telefonen, med Googles kroppsmodell MediaPipe Pose (*heavy*). Ingen video lämnar telefonen.
@@ -113,7 +125,7 @@ Mikrofonen används bara för att känna igen bollträffen. Ljudet analyseras i 
 | 0.2 | Kroppspunkter (MediaPipe) ritade på videon, och ritverktyg för linjer och vinklar |
 | 0.3 | Rättning av kroppspunkterna, svingens faser, felen mäts och rangordnas, och varje fel får förklaring och övningar |
 | 0.4 | Två svingar sida vid sida eller ovanpå varandra, i takt eller i verklig tid, referenssving, och förslag när man klipper |
-| 0.5 | Vridningen av axlar och höfter, och i vilken ordning kroppen startar nedsvingen |
+| 0.5 | Utgick. Vridningen av axlar och höfter, och ordningen i nedsvingen, gick inte att mäta tillförlitligt med en kamera, se nedan |
 | 0.6 | Utvecklingen över tid, och övningar utifrån de senaste svingarna |
 | Senare | Svingplanet bakifrån, inställning för längd och vänsterhänt, övningsläge med ljud |
 

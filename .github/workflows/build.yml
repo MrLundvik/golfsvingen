@@ -55,7 +55,7 @@ jobs:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           # Samma version står i app/build.gradle.kts
-          TAG="v0.4.${{ github.run_number }}"
+          TAG="v0.6.${{ github.run_number }}"
           APK="Golfsvingen-$TAG.apk"
           cp app/build/outputs/apk/release/app-release.apk "$APK"
           printf 'Öppna den här sidan på telefonen, ladda ned %s och installera.\n\nÄndringar:\n%s\n' "$APK" "$COMMIT_MSG" > notes.md

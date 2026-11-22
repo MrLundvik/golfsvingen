@@ -236,4 +236,25 @@ object Coach {
             ),
         ),
     )
+
+    /** Råden med ett namn som går att spara, för utvecklingen över tid. */
+    private val keyed by lazy {
+        mapOf(
+            "TEMPO_FAST" to TEMPO_FAST,
+            "TEMPO_SLOW" to TEMPO_SLOW,
+            "HEAD_DOWN" to HEAD_DOWN,
+            "HEAD_UP" to HEAD_UP,
+            "SWAY" to SWAY,
+            "HEAD_SLIDE" to HEAD_SLIDE,
+            "REVERSE_PIVOT" to REVERSE_PIVOT,
+            "WEIGHT_BACK" to WEIGHT_BACK,
+            "BENT_LEAD_ARM" to BENT_LEAD_ARM,
+            "EARLY_EXTENSION" to EARLY_EXTENSION,
+            "STAND_UP" to STAND_UP,
+            "OVER_THE_TOP" to OVER_THE_TOP,
+        )
+    }
+
+    fun key(advice: Advice?): String? = keyed.entries.firstOrNull { it.value === advice }?.key
+    fun byKey(key: String?): Advice? = key?.let { keyed[it] }
 }
