@@ -62,6 +62,7 @@ import io.github.mrlundvik.golfsvingen.analysis.Metric
 import io.github.mrlundvik.golfsvingen.analysis.SwingReport
 import io.github.mrlundvik.golfsvingen.analysis.View
 import io.github.mrlundvik.golfsvingen.pose.PoseAnalyzer
+import io.github.mrlundvik.golfsvingen.pose.PoseExport
 import io.github.mrlundvik.golfsvingen.pose.PoseStore
 import io.github.mrlundvik.golfsvingen.pose.PoseTrack
 import io.github.mrlundvik.golfsvingen.store.Clip
@@ -359,6 +360,23 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                         showSkeleton = true
                         player.pause()
                         player.seekTo(m.timeUs / 1000)
+                    },
+                    onExport = {
+                        val raw = track
+                        if (raw != null) scope.launch {
+                            val result = withContext(Dispatchers.IO) { runCatching { PoseExport.export(context, clip, raw, clean) } }
+                            result.onSuccess { uri ->
+                                Toast.makeText(context, "Sparad i Hämtade filer/Golfsvingen", Toast.LENGTH_SHORT).show()
+                                val send = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/csv"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                runCatching { context.startActivity(Intent.createChooser(send, "Dela mätdata")) }
+                            }.onFailure {
+                                Toast.makeText(context, "Mätdatan kunde inte sparas: ${it.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
                     },
                     onClose = { reportOpen = false },
                 )

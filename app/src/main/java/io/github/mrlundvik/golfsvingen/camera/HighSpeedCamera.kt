@@ -8,6 +8,8 @@ import android.hardware.camera2.CameraConstrainedHighSpeedCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.os.Handler
@@ -69,9 +71,21 @@ class HighSpeedCamera(private val context: Context, private val config: HighSpee
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     @Volatile private var closed = false
+    private var onExposure: (Long, Int) -> Unit = { _, _ -> }
+
+    // Slutartiden avgör hur suddiga händerna blir. Den läses av en gång per halvsekund
+    private val results = object : CameraCaptureSession.CaptureCallback() {
+        private var count = 0
+        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+            if (count++ % (config.fps / 2).coerceAtLeast(1) != 0) return
+            val exposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: return
+            onExposure(exposure, result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0)
+        }
+    }
 
     @SuppressLint("MissingPermission")
-    fun start(preview: Surface, encoder: Surface, onError: (String) -> Unit) {
+    fun start(preview: Surface, encoder: Surface, onExposure: (Long, Int) -> Unit, onError: (String) -> Unit) {
+        this.onExposure = onExposure
         val manager = context.getSystemService(CameraManager::class.java)
         try {
             manager.openCamera(config.cameraId, executor, object : CameraDevice.StateCallback() {
@@ -111,7 +125,7 @@ class HighSpeedCamera(private val context: Context, private val config: HighSpee
                         set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, config.fpsRange)
                         set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
                     }.build()
-                    highSpeed.setRepeatingBurst(highSpeed.createHighSpeedRequestList(request), null, handler)
+                    highSpeed.setRepeatingBurst(highSpeed.createHighSpeedRequestList(request), results, handler)
                 } catch (e: Exception) {
                     Log.e("Golfsvingen", "Höghastighetsläget kunde inte starta", e)
                     onError("Höghastighetsläget kunde inte starta: ${e.message}")

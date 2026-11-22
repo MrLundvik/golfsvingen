@@ -7,6 +7,7 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -41,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -67,6 +70,8 @@ import io.github.mrlundvik.golfsvingen.trigger.ImpactDetector
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
+import kotlin.math.roundToInt
 
 private const val SOUND_PRE_US = 3_500_000L
 private const val SOUND_POST_US = 1_500_000L
@@ -74,10 +79,17 @@ private const val MANUAL_PRE_US = 5_000_000L
 private const val MANUAL_POST_US = 300_000L
 
 // Självutlösaren: väntetid före filmningen, och hur länge den filmar. Bufferten rymmer 10 s.
-private val DELAYS = listOf(0, 3, 5, 10, 15, 20, 30)
+private val DELAYS = listOf(3, 5, 10, 15, 20, 30)
 private const val DEFAULT_DELAY_S = 5
 private const val DEFAULT_LENGTH_S = 6
 private val LENGTHS = 2..9
+/** Starta nu filmar tills man trycker Stoppa, men högst så här länge, så att allt ryms i bufferten. */
+private const val MAX_RECORD_MS = 9_000L
+/** Lite extra efter Stoppa, så att avslutet kommer med även om man trycker precis då. */
+private const val STOP_POST_US = 300_000L
+/** Längre slutartid än så här ger suddiga händer i nedsvingen. */
+private const val SLOW_SHUTTER_NS = 2_500_000L
+private val SV = Locale("sv", "SE")
 
 private fun hasPermissions(context: Context) =
     listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).all {
@@ -145,10 +157,15 @@ fun CameraScreen(activity: MainActivity, onOpenLibrary: () -> Unit) {
     val scope = rememberCoroutineScope()
     val tones = remember { runCatching { ToneGenerator(AudioManager.STREAM_ALARM, 90) }.getOrNull() }
     DisposableEffect(tones) { onDispose { tones?.release() } }
-    var timerJob by remember { mutableStateOf<Job?>(null) }
-    var timerActive by remember { mutableStateOf(false) }
+    var job by remember { mutableStateOf<Job?>(null) }
+    // Nedräkning, filmning eller tonen efteråt. Ljudtriggern lyssnar inte då
+    var busy by remember { mutableStateOf(false) }
     var countdown by remember { mutableIntStateOf(0) }
-    var recordingLeft by remember { mutableIntStateOf(0) }
+    var recording by remember { mutableStateOf(false) }
+    var recElapsedMs by remember { mutableLongStateOf(0L) }
+    var recLimitMs by remember { mutableLongStateOf(0L) }
+    var stopRequested by remember { mutableStateOf(false) }
+    var shutterNs by remember { mutableLongStateOf(0L) }
 
     val save: (Boolean) -> Unit = { manual ->
         val ok = if (manual) pipeline.save(MANUAL_PRE_US, MANUAL_POST_US) else pipeline.save(SOUND_PRE_US, SOUND_POST_US)
@@ -158,37 +175,58 @@ fun CameraScreen(activity: MainActivity, onOpenLibrary: () -> Unit) {
         }
     }
 
-    val startTimer: () -> Unit = {
-        timerActive = true
-        timerJob = scope.launch {
+    // Filmar från nu tills Stoppa trycks eller tiden [limitMs] gått, och sparar sedan just det avsnittet
+    val record: suspend (Long) -> Unit = { limitMs ->
+        val startUs = pipeline.nowUs()
+        if (startUs < 0) {
+            status = "Kameran är inte redo än"
+        } else {
+            tones?.startTone(ToneGenerator.TONE_PROP_BEEP2, 400)
+            stopRequested = false
+            recLimitMs = limitMs
+            recElapsedMs = 0L
+            recording = true
+            status = "Filmar…"
+            val t0 = SystemClock.elapsedRealtime()
             try {
-                for (s in delayS downTo 1) {
-                    countdown = s
-                    tones?.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
-                    delay(1000)
-                }
-                countdown = 0
-                // Sparar från nu och lengthS sekunder framåt
-                if (pipeline.save(0L, lengthS * 1_000_000L)) {
-                    tones?.startTone(ToneGenerator.TONE_PROP_BEEP2, 400)
-                    flash = true
-                    status = "Filmar…"
-                    for (s in lengthS downTo 1) {
-                        recordingLeft = s
-                        delay(1000)
-                    }
-                    recordingLeft = 0
-                    tones?.startTone(ToneGenerator.TONE_PROP_ACK, 300)
-                    // Låt tonen klinga av innan ljudtriggern lyssnar igen
-                    delay(800)
-                } else {
-                    status = "Kameran är inte redo än"
+                while (!stopRequested && recElapsedMs < limitMs) {
+                    delay(50)
+                    recElapsedMs = SystemClock.elapsedRealtime() - t0
                 }
             } finally {
+                recording = false
+            }
+            if (pipeline.saveFrom(startUs, STOP_POST_US)) {
+                flash = true
+                status = "Sparar svingen…"
+            } else {
+                status = "Svingen kunde inte sparas"
+            }
+            tones?.startTone(ToneGenerator.TONE_PROP_ACK, 300)
+            // Låt tonen klinga av innan ljudtriggern lyssnar igen
+            delay(800)
+        }
+    }
+
+    // Med självutlösaren räknas det ned först och filmas den inställda tiden. Starta nu filmar direkt, tills Stoppa
+    val begin: (Boolean) -> Unit = { withTimer ->
+        busy = true
+        job = scope.launch {
+            try {
+                if (withTimer) {
+                    for (s in delayS downTo 1) {
+                        countdown = s
+                        tones?.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+                        delay(1000)
+                    }
+                    countdown = 0
+                }
+                record(if (withTimer) lengthS * 1000L else MAX_RECORD_MS)
+            } finally {
                 countdown = 0
-                recordingLeft = 0
-                timerActive = false
-                timerJob = null
+                recording = false
+                busy = false
+                job = null
             }
         }
     }
@@ -205,6 +243,9 @@ fun CameraScreen(activity: MainActivity, onOpenLibrary: () -> Unit) {
                 flash = false
                 status = text
             }
+            override fun onExposure(exposureNs: Long, iso: Int) {
+                shutterNs = exposureNs
+            }
         }
         onDispose {
             pipeline.listener = null
@@ -218,7 +259,7 @@ fun CameraScreen(activity: MainActivity, onOpenLibrary: () -> Unit) {
             detector.start(
                 onLevel = { v -> main.post { level = v } },
                 // Självutlösarens pip får inte räknas som en bollträff
-                onImpact = { main.post { if (!timerActive) save(false) } },
+                onImpact = { main.post { if (!busy) save(false) } },
             )
         }
         onDispose { detector.stop() }
@@ -283,9 +324,22 @@ fun CameraScreen(activity: MainActivity, onOpenLibrary: () -> Unit) {
                             .padding(horizontal = 40.dp, vertical = 4.dp),
                     )
                 }
-                if (recordingLeft > 0) {
+                if (shutterNs > 0) {
+                    val slow = shutterNs > SLOW_SHUTTER_NS
                     Text(
-                        "● Filmar  $recordingLeft",
+                        (if (slow) "Lite ljus · " else "") + "1/${(1e9 / shutterNs).roundToInt()} s",
+                        fontSize = 13.sp,
+                        color = if (slow) Color.Black else Color.White,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(10.dp)
+                            .background(if (slow) Warn.copy(alpha = 0.9f) else Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+                if (recording) {
+                    Text(
+                        "● Filmar  " + String.format(SV, "%.1f / %d s", recElapsedMs / 1000f, (recLimitMs / 1000).toInt()),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -323,7 +377,7 @@ fun CameraScreen(activity: MainActivity, onOpenLibrary: () -> Unit) {
                 Stepper(
                     label = "Vänta",
                     value = "$delayS s",
-                    enabled = !timerActive,
+                    enabled = !busy,
                     onMinus = {
                         delayIndex = (delayIndex - 1).coerceAtLeast(0)
                         prefs.edit().putInt("timerDelay", DELAYS[delayIndex]).apply()
@@ -337,7 +391,7 @@ fun CameraScreen(activity: MainActivity, onOpenLibrary: () -> Unit) {
                 Stepper(
                     label = "Filma",
                     value = "$lengthS s",
-                    enabled = !timerActive,
+                    enabled = !busy,
                     onMinus = {
                         lengthS = (lengthS - 1).coerceIn(LENGTHS)
                         prefs.edit().putInt("timerLength", lengthS).apply()
@@ -348,19 +402,25 @@ fun CameraScreen(activity: MainActivity, onOpenLibrary: () -> Unit) {
                     },
                 )
             }
-            Button(
-                onClick = { if (!timerActive) startTimer() else if (countdown > 0) timerJob?.cancel() },
-                enabled = !timerActive || countdown > 0,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            ) {
-                Text(
-                    when {
-                        countdown > 0 -> "Avbryt ($countdown)"
-                        timerActive -> "Filmar…"
-                        delayS == 0 -> "Filma $lengthS s nu"
-                        else -> "Filma om $delayS s"
-                    },
-                )
+            when {
+                countdown > 0 -> Button(onClick = { job?.cancel() }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Text("Avbryt ($countdown)")
+                }
+                recording -> Button(
+                    onClick = { stopRequested = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = Warn, contentColor = Color.Black),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                ) {
+                    Text("■  Stoppa  " + String.format(SV, "%.1f s", recElapsedMs / 1000f), fontWeight = FontWeight.Bold)
+                }
+                else -> Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { begin(true) }, enabled = !busy, modifier = Modifier.weight(1f)) {
+                        Text("Filma om $delayS s")
+                    }
+                    Button(onClick = { begin(false) }, enabled = !busy, modifier = Modifier.weight(1f)) {
+                        Text("● Starta nu")
+                    }
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = { save(true) }, modifier = Modifier.weight(1f)) { Text("Spara senaste") }
@@ -369,7 +429,7 @@ fun CameraScreen(activity: MainActivity, onOpenLibrary: () -> Unit) {
                 }
             }
             Text(
-                "Volymknappen eller en Bluetooth-fjärrutlösare sparar också de senaste sekunderna.",
+                "Starta nu filmar tills du trycker Stoppa, högst ${MAX_RECORD_MS / 1000} s. Volymknappen eller en Bluetooth-fjärrutlösare sparar de senaste sekunderna.",
                 fontSize = 12.sp,
                 color = Color.White.copy(alpha = 0.6f),
                 modifier = Modifier.padding(top = 6.dp),

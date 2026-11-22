@@ -18,9 +18,11 @@ En ny version installeras på samma sätt, ovanpå den gamla. Svingarna ligger k
 2. Slå. Appen filmar hela tiden och behåller de senaste sekunderna. När den hör bollträffen sparas 3,5 sekunder före och 1,5 sekunder efter, alltså hela svingen.
 3. Utan boll: klappa i händerna direkt efter svingen. Eller tryck på en volymknapp, eller på en Bluetooth-fjärrutlösare, så sparas de senaste 5 sekunderna.
 
-**Självutlösaren.** Tryck på **Filma om 5 s** och gå till bollen. Appen piper varje sekund, ger ett långt pip när den börjar filma och ett dubbelpip när den är klar. Väntetiden (0–30 s) och filmtiden (2–9 s) ställs in med − och +, och appen kommer ihåg dem. Ljudtriggern är avstängd medan självutlösaren går, så att pipen inte räknas som en träff. Pipen går på larmvolymen.
+**Självutlösaren.** Tryck på **Filma om 5 s** och gå till bollen. Appen piper varje sekund, ger ett långt pip när den börjar filma och ett dubbelpip när den är klar. Väntetiden (3–30 s) och filmtiden (2–9 s) ställs in med − och +, och appen kommer ihåg dem. **Stoppa** avslutar filmningen i förtid. Ljudtriggern är avstängd medan självutlösaren går, så att pipen inte räknas som en träff. Pipen går på larmvolymen.
 
-**Ljus ger skärpa.** 240 fps betyder att varje bild exponeras högst 1/240 s, och kortare ju ljusare det är. Kroppen blir skarp utomhus i dagsljus. Inomhus behövs mycket ljus, och klubbhuvudet blir alltid suddigt vid träffen.
+**Starta nu.** När någon annan filmar: tryck på **Starta nu** och sedan **Stoppa** efter svingen. Det som filmades däremellan sparas, högst 9 s.
+
+**Ljus ger skärpa.** 240 fps betyder att varje bild exponeras högst 1/240 s, och kortare ju ljusare det är. Kroppen blir skarp utomhus i dagsljus. Inomhus behövs mycket ljus, och klubbhuvudet blir alltid suddigt vid träffen. Slutartiden står överst till höger. Är den längre än 1/400 s står det **Lite ljus**, och då blir händerna suddiga i nedsvingen.
 
 Justera känsligheten med reglaget om appen missar träffar eller reagerar på annat ljud. Mätaren visar ljudnivån och den vita linjen gränsen.
 
@@ -43,7 +45,9 @@ När du öppnar en sving första gången letar appen upp kroppen i 120 bilder pe
 
 Vinklarna mäts i bilden och beror därför på var kameran står. Jämför helst svingar som är filmade från samma ställe.
 
-Kroppsmodellen ser bara en platt bild. Appen rättar därför tre vanliga fel innan något ritas eller mäts. Vänster och höger som byter plats mellan två bilder byts tillbaka. En handled som skyms av den andra handen följer den säkrare, eftersom händerna sitter ihop i greppet. Korta luckor, under 0,2 s, där en punkt är osäker fylls i mellan de närmaste säkra bilderna.
+Kroppsmodellen ser bara en platt bild. Appen rättar därför fyra vanliga fel innan något ritas eller mäts. Vänster och höger som byter plats mellan två bilder byts tillbaka. En handled som skyms av den andra handen följer den säkrare, eftersom händerna sitter ihop i greppet. Korta luckor, under 0,2 s, där en punkt är osäker fylls i mellan de närmaste säkra bilderna.
+
+Det fjärde är rörelseoskärpa. I nedsvingen går händerna så fort att de blir suddiga i svagt ljus, och modellen lägger då handlederna inne vid kroppen. Det känns igen på att båda underarmarna blir mycket kortare än vanligt medan armarna rör sig snabbt. Händerna läggs då längs en båge runt axlarna mellan de närmaste skarpa bilderna, i högst 0,4 s. Den delen av handbanan, och underarmarna, ritas streckade. Mätningar som bygger på den delen visas som *Kunde inte mätas*.
 
 ## Svingrapporten
 
@@ -67,6 +71,8 @@ Felen som mäts beror på var kameran står. Appen gissar det från bilden, och 
 Felen rangordnas efter hur stora de är och hur grundläggande de är. Tryck på ett fel för att läsa vad det innebär, hur det ska se ut och vilka övningar som hjälper, med länkar till filmer. **Visa** hoppar till rätt bild och ritar referenslinjer, med uppställningen som en vit skugga så att det syns vad som rört sig.
 
 Centimetrarna räknas fram med benlängden, höft till fotled, som skala. Den antas vara 80 cm. Gränserna är uppskattade och en utgångspunkt, inte en sanning. De justeras när fler svingar har testats.
+
+**Dela mätdata** i rapporten sparar kroppspunkterna som en CSV-fil i Hämtade filer/Golfsvingen, utan video, för att kunna justera mätningarna på en dator.
 
 Analysen körs på grafikprocessorn. Fungerar inte den används processorn i stället, och det står vilken som användes överst till höger.
 

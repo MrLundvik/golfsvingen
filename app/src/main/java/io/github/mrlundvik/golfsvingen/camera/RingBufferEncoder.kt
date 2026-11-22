@@ -176,6 +176,19 @@ class RingBufferEncoder(
         return out
     }
 
+    /** Den senaste bildens tid, eller -1 innan kodaren gett någon bild. */
+    val currentPtsUs: Long get() = latestPtsUs
+
+    /** Sparar från bildtiden [startPtsUs] till [postUs] efter nu. Används när filmningen startas och stoppas för hand. */
+    fun requestSaveFrom(startPtsUs: Long, postUs: Long, onReady: (List<Frame>, MediaFormat) -> Unit): Boolean {
+        synchronized(lock) {
+            val now = latestPtsUs
+            if (now < 0 || startPtsUs < 0) return false
+            pending += PendingSave(now, now - startPtsUs, postUs, onReady)
+            return true
+        }
+    }
+
     /** Sparar från [preUs] före till [postUs] efter nu. Returnerar false om det inte gick, eller om en sparning nyss begärts. */
     fun requestSave(preUs: Long, postUs: Long, onReady: (List<Frame>, MediaFormat) -> Unit): Boolean {
         synchronized(lock) {

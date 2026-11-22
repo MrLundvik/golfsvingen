@@ -54,11 +54,13 @@ fun ReportPanel(
     onView: (View) -> Unit,
     onSeek: (Long) -> Unit,
     onShow: (Metric) -> Unit,
+    onExport: () -> Unit,
     onClose: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Svingrapport", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onExport) { Text("Dela mätdata") }
             TextButton(onClick = onClose) { Text("Stäng") }
         }
         if (report == null) {
@@ -95,6 +97,15 @@ fun ReportPanel(
             }
         }
         Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
+            if (report.handsEstimated) {
+                Text(
+                    "Händerna var suddiga i nedsvingen, så där är deras bana uppskattad och streckad. Med 240 fps blir " +
+                        "slutartiden som längst 1/240 s, och inomhus räcker ljuset sällan till skarpa händer. Filma helst utomhus i dagsljus.",
+                    fontSize = 12.sp,
+                    color = Sun,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
             val faults = report.faults
             if (faults.isEmpty()) {
                 Text(

@@ -34,6 +34,7 @@ import io.github.mrlundvik.golfsvingen.analysis.DownswingColor
 import io.github.mrlundvik.golfsvingen.analysis.GoodColor
 import io.github.mrlundvik.golfsvingen.analysis.Guide
 import io.github.mrlundvik.golfsvingen.analysis.GuideLine
+import io.github.mrlundvik.golfsvingen.pose.HandPoint
 import io.github.mrlundvik.golfsvingen.pose.Landmark
 import io.github.mrlundvik.golfsvingen.pose.Pose
 import io.github.mrlundvik.golfsvingen.pose.PoseTrack
@@ -205,7 +206,7 @@ fun SwingOverlay(
             }
             if (showPath || guide?.pathSplitUs != null) drawHandPath(track, timeUs, pxy, guide?.pathSplitUs)
             if (showSkeleton && pose != null) {
-                drawSkeleton(pose, pxy)
+                drawSkeleton(pose, pxy, handsEstimated = track.handsEstimatedAt(timeUs))
                 for ((i, j) in guide?.bones.orEmpty()) {
                     drawLine(Sun, pxy(pose.x(i), pose.y(i)), pxy(pose.x(j), pose.y(j)), strokeWidth = 11f, cap = StrokeCap.Round)
                 }
@@ -241,7 +242,10 @@ fun SwingOverlay(
     }
 }
 
-private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost: Boolean = false) {
+// Underarmar och händer, som ritas streckade när händerna är uppskattade
+private val HAND_BONES = setOf(13 to 15, 14 to 16, 15 to 19, 16 to 20)
+
+private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost: Boolean = false, handsEstimated: Boolean = false) {
     for ((i, j) in Landmark.BONES) {
         if (p.v(i) < 0.2f || p.v(j) < 0.2f) continue
         val color = when {
@@ -250,12 +254,21 @@ private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost:
             i % 2 == 0 && j % 2 == 0 -> RightSide.copy(alpha = 0.9f)
             else -> Color.White.copy(alpha = 0.9f)
         }
-        drawLine(color, px(p.x(i), p.y(i)), px(p.x(j), p.y(j)), strokeWidth = if (ghost) 4f else 6f, cap = StrokeCap.Round)
+        val guessed = handsEstimated && (i to j) in HAND_BONES
+        drawLine(
+            if (guessed) color.copy(alpha = 0.6f) else color, px(p.x(i), p.y(i)), px(p.x(j), p.y(j)),
+            strokeWidth = if (ghost) 4f else 6f, cap = if (guessed) StrokeCap.Butt else StrokeCap.Round,
+            pathEffect = if (guessed) PathEffect.dashPathEffect(floatArrayOf(12f, 10f)) else null,
+        )
     }
     if (ghost) return
     for (i in Landmark.JOINTS) {
         if (p.v(i) < 0.2f) continue
-        drawCircle(Color.White, radius = 7f, center = px(p.x(i), p.y(i)))
+        if (handsEstimated && (i == Landmark.WRIST_L || i == Landmark.WRIST_R)) {
+            drawCircle(Color.White, radius = 8f, center = px(p.x(i), p.y(i)), style = Stroke(width = 3f))
+        } else {
+            drawCircle(Color.White, radius = 7f, center = px(p.x(i), p.y(i)))
+        }
     }
     // Ryggen, från höfternas mitt till axlarnas mitt
     val hip = px((p.x(Landmark.HIP_L) + p.x(Landmark.HIP_R)) / 2, (p.y(Landmark.HIP_L) + p.y(Landmark.HIP_R)) / 2)
@@ -268,35 +281,42 @@ private fun DrawScope.drawHandPath(track: PoseTrack, timeUs: Long, px: (Float, F
     if (points.size < 2) return
     if (splitUs != null) {
         // Backswingen grön och nedsvingen orange, för att jämföra banorna
-        val up = Path()
-        val down = Path()
-        var upStarted = false
-        var downStarted = false
-        for (pt in points) {
-            val o = px(pt.second, pt.third)
-            if (pt.first <= splitUs) {
-                if (!upStarted) { up.moveTo(o.x, o.y); upStarted = true } else up.lineTo(o.x, o.y)
-            }
-            if (pt.first >= splitUs) {
-                if (!downStarted) { down.moveTo(o.x, o.y); downStarted = true } else down.lineTo(o.x, o.y)
-            }
-        }
-        drawPath(up, GoodColor, style = Stroke(width = 6f, cap = StrokeCap.Round))
-        drawPath(down, DownswingColor, style = Stroke(width = 6f, cap = StrokeCap.Round))
+        drawPathPart(points, px, GoodColor, 6f) { it.t <= splitUs }
+        drawPathPart(points, px, DownswingColor, 6f) { it.t >= splitUs }
         return
     }
-    val all = Path()
-    val done = Path()
-    var started = false
-    for ((k, pt) in points.withIndex()) {
-        val o = px(pt.second, pt.third)
-        if (k == 0) all.moveTo(o.x, o.y) else all.lineTo(o.x, o.y)
-        if (pt.first <= timeUs) {
-            if (!started) { done.moveTo(o.x, o.y); started = true } else done.lineTo(o.x, o.y)
+    drawPathPart(points, px, Sun.copy(alpha = 0.3f), 4f) { true }
+    drawPathPart(points, px, Sun, 5f) { it.t <= timeUs }
+}
+
+/** Ritar de punkter som [include] godtar. Där händerna var suddiga och läget är uppskattat blir linjen streckad. */
+private fun DrawScope.drawPathPart(
+    points: List<HandPoint>,
+    px: (Float, Float) -> Offset,
+    color: Color,
+    width: Float,
+    include: (HandPoint) -> Boolean,
+) {
+    val solid = Path()
+    val dashed = Path()
+    var prev: HandPoint? = null
+    var lastKind = -1
+    for (p in points) {
+        if (!include(p)) { prev = null; lastKind = -1; continue }
+        val q = prev
+        if (q != null) {
+            val kind = if (p.estimated || q.estimated) 1 else 0
+            val path = if (kind == 1) dashed else solid
+            val a = px(q.x, q.y)
+            val b = px(p.x, p.y)
+            if (kind != lastKind) path.moveTo(a.x, a.y)
+            path.lineTo(b.x, b.y)
+            lastKind = kind
         }
+        prev = p
     }
-    drawPath(all, Sun.copy(alpha = 0.3f), style = Stroke(width = 4f, cap = StrokeCap.Round))
-    if (started) drawPath(done, Sun, style = Stroke(width = 5f, cap = StrokeCap.Round))
+    drawPath(solid, color, style = Stroke(width = width, cap = StrokeCap.Round))
+    drawPath(dashed, color, style = Stroke(width = width, pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 12f))))
 }
 
 private fun DrawScope.drawMark(m: Mark, r: Rect, stroke: Float, paint: Paint, px: (Offset) -> Offset) {

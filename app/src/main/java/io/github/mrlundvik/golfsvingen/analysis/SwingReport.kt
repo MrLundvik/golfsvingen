@@ -60,6 +60,8 @@ class Report(
     val backswingS: Float,
     val downswingS: Float,
     val metrics: List<Metric>,
+    /** Händerna var suddiga någon gång mellan toppen och avslutet, och deras läge är uppskattat där. */
+    val handsEstimated: Boolean = false,
 ) {
     val faults get() = metrics.filter { it.status == Status.FAULT }.sortedByDescending { it.score }
     val others get() = metrics.filter { it.status != Status.FAULT }
@@ -86,6 +88,7 @@ object SwingReport {
         val n = frames.size
         val poses = frames.map { track.poseAt(it) }
         val times = LongArray(n) { track.timesUs[frames[it]] }
+        val est = BooleanArray(n) { track.handsEstimated(frames[it]) }
 
         fun pt(p: Pose, i: Int) = Offset(p.x(i) * w, p.y(i) * h)
         fun mid(p: Pose, a: Int, b: Int) = (pt(p, a) + pt(p, b)) / 2f
@@ -150,6 +153,9 @@ object SwingReport {
         val pFin = poses[finish]
         val backswingS = (times[top] - times[start]) / 1e6f
         val downswingS = (times[impact] - times[top]) / 1e6f
+        // Träffen hittas med händerna. Var de suddiga där är tiden ungefärlig
+        val impactApprox = (maxOf(0, impact - 2)..minOf(n - 1, impact + 2)).any { est[it] }
+        val approx = if (impactApprox) "≈ " else ""
 
         // Kamerans läge: framifrån syns axlarna och höfterna breda, bakifrån nästan i linje
         val wide = (abs(pt(p0, 11).x - pt(p0, 12).x) + abs(pt(p0, 23).x - pt(p0, 24).x)) / 2 / leg
@@ -172,7 +178,7 @@ object SwingReport {
         val ratio = backswingS / downswingS
         metrics += metric(
             "tempo", "Tempo",
-            "${f1(ratio)} : 1  (${f2(backswingS)} s upp, ${f2(downswingS)} s ned)",
+            "$approx${f1(ratio)} : 1  (${f2(backswingS)} s upp, ${f2(downswingS)} s ned)",
             "Bra: omkring 3 : 1",
             ratio < 2.2f || ratio > 4.5f,
             if (ratio < 2.2f) (2.2f - ratio) / 0.8f else (ratio - 4.5f) / 1.5f,
@@ -375,9 +381,14 @@ object SwingReport {
             // Händernas bana: på halva höjden mellan uppställningen och toppen,
             // jämförs var händerna är på väg upp och på väg ned
             val level = (hands[start].y + hands[top].y) / 2
-            val up = crossing(hands, start, top, level)
-            val down = crossing(hands, top, impact, level)
-            if (up != null && down != null) {
+            val upAt = crossing(hands, start, top, level)
+            val downAt = crossing(hands, top, impact, level)
+            val up = upAt?.first
+            val down = downAt?.first
+            val blurred = downAt != null && (maxOf(0, downAt.second - 2)..minOf(n - 1, downAt.second + 3)).any { est[it] }
+            if (blurred) {
+                metrics += unknown("over-the-top", "Händerna i nedsvingen", times[impact], "Kunde inte mätas: händerna är suddiga i nedsvingen")
+            } else if (up != null && down != null) {
                 val outside = cm((down.x - up.x) * ball)
                 val ottFault = outside > 4f
                 metrics += metric(
@@ -406,23 +417,23 @@ object SwingReport {
         val phases = listOf(
             Phase("Uppställning", times[start]),
             Phase("Toppen", times[top]),
-            Phase("Träffen", times[impact]),
+            Phase(if (impactApprox) "Träffen ≈" else "Träffen", times[impact]),
             Phase("Avslut", times[finish]),
         )
-        return Report(view, guessed, phases, backswingS, downswingS, metrics)
+        return Report(view, guessed, phases, backswingS, downswingS, metrics, (top..finish).any { est[it] })
     }
 
-    private fun unknown(id: String, name: String, timeUs: Long) =
-        Metric(id, name, "Kunde inte mätas", "", Status.UNKNOWN, 0f, timeUs, Guide(), null)
+    private fun unknown(id: String, name: String, timeUs: Long, value: String = "Kunde inte mätas") =
+        Metric(id, name, value, "", Status.UNKNOWN, 0f, timeUs, Guide(), null)
 
-    /** Var händerna passerar höjden [level] mellan bild [from] och [to], interpolerat. */
-    private fun crossing(hands: List<Offset>, from: Int, to: Int, level: Float): Offset? {
+    /** Var händerna passerar höjden [level] mellan bild [from] och [to], interpolerat, och bilden före passagen. */
+    private fun crossing(hands: List<Offset>, from: Int, to: Int, level: Float): Pair<Offset, Int>? {
         for (i in from until to) {
             val a = hands[i]
             val b = hands[i + 1]
             if ((a.y - level) * (b.y - level) <= 0f && a.y != b.y) {
                 val t = (level - a.y) / (b.y - a.y)
-                return Offset(a.x + (b.x - a.x) * t, level)
+                return Offset(a.x + (b.x - a.x) * t, level) to i
             }
         }
         return null
