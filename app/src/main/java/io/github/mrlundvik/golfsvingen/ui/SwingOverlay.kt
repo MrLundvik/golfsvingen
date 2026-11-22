@@ -81,6 +81,10 @@ object MarkStore {
         }
     }.getOrDefault(emptyList())
 
+    fun delete(context: Context, clip: Clip) {
+        file(context, clip).delete()
+    }
+
     fun save(context: Context, clip: Clip, marks: List<Mark>) {
         fun s(o: Offset) = "${o.x} ${o.y}"
         file(context, clip).writeText(
@@ -129,8 +133,13 @@ fun SwingOverlay(
     tool: Tool?,
     onAdd: (Mark) -> Unit,
     guide: Guide? = null,
+    /** Videons zoom och förflyttning. Allt ritas på samma ställen i bilden, men med samma linjetjocklek. */
+    zoom: Float = 1f,
+    pan: Offset = Offset.Zero,
 ) {
     val add by rememberUpdatedState(onAdd)
+    val currentZoom by rememberUpdatedState(zoom)
+    val currentPan by rememberUpdatedState(pan)
     var dragStart by remember { mutableStateOf<Offset?>(null) }
     var dragEnd by remember { mutableStateOf<Offset?>(null) }
     val tapped = remember { mutableStateListOf<Offset>() }
@@ -147,8 +156,9 @@ fun SwingOverlay(
         }
     }
 
-    fun norm(p: Offset, size: IntSize): Offset {
+    fun norm(touch: Offset, size: IntSize): Offset {
         val r = videoRect(Size(size.width.toFloat(), size.height.toFloat()), aspect)
+        val p = (touch - currentPan) / currentZoom
         return Offset(((p.x - r.left) / r.width).coerceIn(0f, 1f), ((p.y - r.top) / r.height).coerceIn(0f, 1f))
     }
 
@@ -183,7 +193,7 @@ fun SwingOverlay(
 
     Canvas(modifier.then(gestures)) {
         val r = videoRect(size, aspect)
-        val pxy: (Float, Float) -> Offset = { x, y -> Offset(r.left + x * r.width, r.top + y * r.height) }
+        val pxy: (Float, Float) -> Offset = { x, y -> Offset(r.left + x * r.width, r.top + y * r.height) * zoom + pan }
         val pxo: (Offset) -> Offset = { o -> pxy(o.x, o.y) }
         textPaint.textSize = 15.sp.toPx()
 
@@ -195,7 +205,7 @@ fun SwingOverlay(
                 val (hx, hy, hr) = track.head(start)
                 drawCircle(
                     Color.White.copy(alpha = 0.85f),
-                    radius = hr * r.width,
+                    radius = hr * r.width * zoom,
                     center = pxy(hx, hy),
                     style = Stroke(width = 3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f))),
                 )

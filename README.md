@@ -30,6 +30,10 @@ Justera känsligheten med reglaget om appen missar träffar eller reagerar på a
 
 I telefonens *Filmer/Golfsvingen*. De syns i Google Foto och Filer. Under **Mina svingar** kan du spela upp en sving i 1×, ¼, ⅛ eller 1/16 fart, stega bild för bild, dela den, spara en kopia till Google Drive med **Spara till…**, eller radera den.
 
+**Radera utan att öppna.** Håll inne på en sving i listan för att markera den, och tryck på fler för att markera flera, eller **Alla**. **Radera** lägger dem i papperskorgen, där de finns kvar i 30 dagar. Det gör även **Radera** när en sving är öppen.
+
+**Zooma.** Nyp med två fingrar på videon, upp till 6×, både när den spelar och när den står still. Inzoomad flyttar du bilden med ett finger, och ett dubbeltryck eller **Återställ** zoomar ut. Skelettet och markeringarna följer med. **Helskärm** döljer allt utom videon, med stegknappar, spela och reglage längst ned. Tryck på farten för att byta den.
+
 **Klipp** tar bort det du inte vill spara, till exempel sekunderna när du står still. Dra i reglagets två ändar, eller stega fram till rätt bild och tryck **Start här** och **Slut här**. Medan du klipper spelas bara det valda avsnittet. **Spara klippet** sparar det som en ny fil och lägger originalet i papperskorgen, där det finns kvar i 30 dagar. Bilderna kopieras utan omkodning, så kvaliteten är oförändrad, men klippet börjar på närmaste nyckelbild, högst en halv sekund före den bild du valt.
 
 Filerna har verklig tid, 240 bilder per sekund. Andra spelare visar dem därför i normal fart.
@@ -72,7 +76,7 @@ Felen som mäts beror på var kameran står. Appen gissar det från bilden, och 
 
 Tempot räknas från att händerna börjar röra sig till toppen, och från att de kommer upp i fart nedåt till träffen. Tiden däremellan visas som tid vid toppen, så att en paus inte ser ut som en långsam nedsving.
 
-Felen rangordnas efter hur stora de är och hur grundläggande de är. Tryck på ett fel för att läsa vad det innebär, hur det ska se ut och vilka övningar som hjälper, med länkar till filmer. **Visa** hoppar till rätt bild och ritar referenslinjer, med uppställningen som en vit skugga så att det syns vad som rört sig.
+Felen rangordnas efter hur stora de är och hur grundläggande de är. Tryck på ett fel för att läsa vad det innebär, hur det ska se ut och vilka övningar som hjälper, med länkar till filmer. **Visa** hoppar till rätt bild och ritar referenslinjer, med uppställningen som en vit skugga så att det syns vad som rört sig. Rapporten krymper då till den mätningen, så att videon får plats. **◀ Förra** och **Nästa ▶** går mellan mätningarna, chipsen väljer vad som ritas, och **‹ Rapporten** visar hela rapporten igen.
 
 Centimetrarna räknas fram med benlängden, höft till fotled, som skala. Den antas vara 80 cm. Gränserna är uppskattade och en utgångspunkt, inte en sanning. De justeras när fler svingar har testats.
 

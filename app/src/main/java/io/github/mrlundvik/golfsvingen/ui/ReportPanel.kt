@@ -211,3 +211,56 @@ private fun Paragraph(text: String, dim: Boolean = false) {
         modifier = Modifier.padding(top = 6.dp),
     )
 }
+
+/**
+ * En enda mätning, i stället för hela rapporten, så att videon får plats. Pilarna går till föregående
+ * och nästa mätning, och chipsen väljer vad som ritas på videon.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FocusCard(
+    report: Report,
+    metric: Metric,
+    layers: List<Triple<String, Boolean, () -> Unit>>,
+    onPick: (Metric) -> Unit,
+    onBack: () -> Unit,
+) {
+    val list = report.faults + report.others.filter { it.status != Status.UNKNOWN }
+    val i = list.indexOfFirst { it.id == metric.id }
+    val m = list.getOrNull(i) ?: metric
+    val color = when (m.status) {
+        Status.FAULT -> FaultColor
+        Status.GOOD -> GoodColor
+        Status.UNKNOWN -> Color.White.copy(alpha = 0.5f)
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("‹ Rapporten") }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { onPick(list[i - 1]) }, enabled = i > 0) { Text("◀ Förra") }
+            TextButton(onClick = { onPick(list[i + 1]) }, enabled = i >= 0 && i < list.lastIndex) { Text("Nästa ▶") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
+            val rank = report.faults.indexOfFirst { it.id == m.id }
+            val mark = when (m.status) {
+                Status.FAULT -> if (rank >= 0) "${rank + 1}." else "!"
+                Status.GOOD -> "✓"
+                Status.UNKNOWN -> "–"
+            }
+            Text(mark, color = color, fontWeight = FontWeight.Bold, modifier = Modifier.width(24.dp))
+            Column(Modifier.weight(1f)) {
+                Text(m.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(m.value, fontSize = 13.sp, color = color)
+                if (m.goal.isNotEmpty()) Text(m.goal, fontSize = 12.sp, color = Color.White.copy(alpha = 0.55f))
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            for ((label, on, toggle) in layers) {
+                FilterChip(selected = on, onClick = toggle, label = { Text(label) })
+            }
+        }
+    }
+}

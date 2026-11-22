@@ -5,6 +5,30 @@ import android.content.Intent
 import android.media.MediaMetadataRetriever
 import android.provider.MediaStore
 import android.widget.Toast
+import android.view.LayoutInflater
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import io.github.mrlundvik.golfsvingen.R
+import io.github.mrlundvik.golfsvingen.analysis.Guide
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,7 +80,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
-import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import io.github.mrlundvik.golfsvingen.analysis.Metric
 import io.github.mrlundvik.golfsvingen.analysis.SwingReport
@@ -77,6 +100,7 @@ import kotlin.math.max
 import kotlin.math.roundToLong
 
 private val SPEEDS = listOf(1f to "1×", 0.25f to "¼", 0.125f to "⅛", 0.0625f to "1/16")
+private const val MAX_ZOOM = 6f
 private const val MIN_CLIP_MS = 200L
 private val SV = Locale("sv", "SE")
 
@@ -167,6 +191,30 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
     var reportOpen by remember { mutableStateOf(false) }
     var focus by remember { mutableStateOf<Metric?>(null) }
     LaunchedEffect(report) { focus = null }
+    // Efter Visa syns bara den valda mätningen, så att videon får plats. Hjälplinjer och skugga kan väljas bort
+    var compact by remember { mutableStateOf(false) }
+    var showLines by remember { mutableStateOf(true) }
+    var showGhost by remember { mutableStateOf(true) }
+    var fullscreen by remember { mutableStateOf(false) }
+    // Zoom med två fingrar. Ett finger flyttar bilden när den är inzoomad, dubbeltryck återställer
+    var zoom by remember { mutableFloatStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
+    val resetZoom: () -> Unit = { zoom = 1f; pan = Offset.Zero }
+    BackHandler(enabled = !fullscreen && reportOpen && compact && focus != null) { compact = false }
+    BackHandler(enabled = fullscreen) { fullscreen = false }
+    // I helskärm döljs telefonens statusrad och navigeringsfält. Ett svep från kanten visar dem tillfälligt
+    val view = LocalView.current
+    DisposableEffect(fullscreen) {
+        val window = (context as? Activity)?.window
+        val bars = window?.let { WindowCompat.getInsetsController(it, view) }
+        if (fullscreen) {
+            bars?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            bars?.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            bars?.show(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose { bars?.show(WindowInsetsCompat.Type.systemBars()) }
+    }
     var showSkeleton by remember { mutableStateOf(true) }
     var showPath by remember { mutableStateOf(true) }
     var showHead by remember { mutableStateOf(true) }
@@ -222,7 +270,12 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
         }
     }
     val deleteLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
-        if (it.resultCode == Activity.RESULT_OK) onBack()
+        if (it.resultCode == Activity.RESULT_OK) {
+            runCatching { PoseStore.delete(context, clip) }
+            runCatching { MarkStore.delete(context, clip) }
+            Toast.makeText(context, "Svingen ligger i papperskorgen i 30 dagar", Toast.LENGTH_SHORT).show()
+            onBack()
+        }
     }
     // Om originalet inte är appens egen fil frågar telefonen först om det får läggas i papperskorgen
     val trashLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
@@ -256,6 +309,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding()) {
+        if (!fullscreen) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("‹ Mina svingar") }
             if (trimming) Text("Klipp svingen", color = Sun, modifier = Modifier.padding(start = 8.dp))
@@ -281,15 +335,59 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
         analysisError?.let {
             Text(it, fontSize = 12.sp, color = Warn, modifier = Modifier.padding(horizontal = 16.dp))
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        }
+        val drawingNow = drawing && !trimming && tool != null
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clipToBounds()
+                .pointerInput(drawingNow) {
+                    val slop = viewConfiguration.touchSlop
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        var moved = 0f
+                        var active = false
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val fingers = event.changes.count { it.pressed }
+                            if (fingers == 0) break
+                            // Två fingrar zoomar alltid. Ett finger flyttar bara när bilden är inzoomad och man inte ritar
+                            if (fingers >= 2 || (!drawingNow && zoom > 1.01f)) {
+                                val zoomChange = event.calculateZoom()
+                                val panChange = event.calculatePan()
+                                if (!active) {
+                                    moved += panChange.getDistance()
+                                    if (fingers >= 2 || moved > slop) active = true
+                                }
+                                if (active) {
+                                    val c = event.calculateCentroid(useCurrent = true)
+                                    val next = (zoom * zoomChange).coerceIn(1f, MAX_ZOOM)
+                                    val raw = c - (c - pan) * (next / zoom) + panChange
+                                    zoom = next
+                                    pan = Offset(
+                                        raw.x.coerceIn(size.width * (1f - next), 0f),
+                                        raw.y.coerceIn(size.height * (1f - next), 0f),
+                                    )
+                                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                }
+                            }
+                        }
+                    }
+                }
+                .pointerInput(Unit) { detectTapGestures(onDoubleTap = { resetZoom() }) },
+        ) {
             AndroidView(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = zoom
+                    scaleY = zoom
+                    translationX = pan.x
+                    translationY = pan.y
+                    transformOrigin = TransformOrigin(0f, 0f)
+                },
                 factory = { ctx ->
-                    PlayerView(ctx).apply {
+                    (LayoutInflater.from(ctx).inflate(R.layout.player_view, null) as PlayerView).apply {
                         this.player = player
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        setShutterBackgroundColor(android.graphics.Color.BLACK)
                     }
                 },
             )
@@ -304,10 +402,68 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                 marks = marks,
                 tool = if (drawing && !trimming) tool else null,
                 onAdd = { marks += it; saveMarks() },
-                guide = if (reportOpen && !trimming) focus?.guide else null,
+                guide = if (reportOpen && !trimming) focus?.guide?.let { g ->
+                    Guide(
+                        lines = if (showLines) g.lines else emptyList(),
+                        labels = if (showLines) g.labels else emptyList(),
+                        ghost = if (showGhost) g.ghost else null,
+                        pathSplitUs = if (showLines) g.pathSplitUs else null,
+                        bones = if (showLines) g.bones else emptyList(),
+                    )
+                } else null,
+                zoom = zoom,
+                pan = pan,
             )
+            Row(Modifier.align(Alignment.TopEnd).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (zoom > 1.01f) {
+                    VideoButton(String.format(SV, "%.1f× · Återställ", zoom), onClick = resetZoom)
+                }
+                VideoButton(if (fullscreen) "Avsluta helskärm" else "Helskärm", onClick = { fullscreen = !fullscreen })
+            }
+            val f = focus
+            if (fullscreen && reportOpen && f != null) {
+                Text(
+                    "${f.title} · ${f.value}",
+                    fontSize = 13.sp,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+            if (fullscreen) {
+                Column(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    val range = 0f..max(1L, duration).toFloat()
+                    Slider(
+                        value = position.toFloat().coerceIn(range),
+                        onValueChange = { player.pause(); player.seekTo(it.toLong()) },
+                        valueRange = range,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { step(-1) }, modifier = Modifier.weight(1f)) { Text("◀") }
+                        Button(onClick = { if (player.isPlaying) player.pause() else player.play() }, modifier = Modifier.weight(1.4f)) {
+                            Text(if (playing) "Paus" else "Spela")
+                        }
+                        OutlinedButton(onClick = { step(1) }, modifier = Modifier.weight(1f)) { Text("▶") }
+                        // Farten byts med varje tryck
+                        TextButton(onClick = {
+                            val i = SPEEDS.indexOfFirst { it.first == speed }
+                            speed = SPEEDS[(i + 1) % SPEEDS.size].first
+                            player.setPlaybackSpeed(speed)
+                        }) { Text(SPEEDS.firstOrNull { it.first == speed }?.second ?: "1×") }
+                    }
+                }
+            }
         }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (!fullscreen) Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             val range = 0f..max(1L, duration).toFloat()
             if (trimming) {
                 RangeSlider(
@@ -347,7 +503,26 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                 }
                 OutlinedButton(onClick = { step(1) }, modifier = Modifier.weight(1f)) { Text("Bild ▶") }
             }
-            if (reportOpen && !trimming) {
+            val focused = focus
+            if (reportOpen && !trimming && compact && focused != null && report != null) {
+                FocusCard(
+                    report = report,
+                    metric = focused,
+                    layers = listOf(
+                        Triple("Hjälplinjer", showLines) { showLines = !showLines },
+                        Triple("Skugga", showGhost) { showGhost = !showGhost },
+                        Triple("Skelett", showSkeleton) { showSkeleton = !showSkeleton },
+                        Triple("Handbana", showPath) { showPath = !showPath },
+                        Triple("Huvud", showHead) { showHead = !showHead },
+                    ),
+                    onPick = { m ->
+                        focus = m
+                        player.pause()
+                        player.seekTo(m.timeUs / 1000)
+                    },
+                    onBack = { compact = false },
+                )
+            } else if (reportOpen && !trimming) {
                 val t = track
                 ReportPanel(
                     report = report,
@@ -357,6 +532,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                     onSeek = { us -> player.pause(); player.seekTo(us / 1000) },
                     onShow = { m ->
                         focus = m
+                        compact = true
                         showSkeleton = true
                         player.pause()
                         player.seekTo(m.timeUs / 1000)
@@ -378,7 +554,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                             }
                         }
                     },
-                    onClose = { reportOpen = false },
+                    onClose = { reportOpen = false; compact = false },
                 )
             } else {
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -475,7 +651,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                     }, enabled = duration > MIN_CLIP_MS) { Text("Klipp") }
                     TextButton(onClick = { saveLauncher.launch(clip.name) }) { Text("Spara till…") }
                     TextButton(onClick = {
-                        val request = MediaStore.createDeleteRequest(context.contentResolver, listOf(clip.uri))
+                        val request = MediaStore.createTrashRequest(context.contentResolver, listOf(clip.uri), true)
                         deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
                     }) { Text("Radera", color = Warn) }
                 }
@@ -483,4 +659,19 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
             }
         }
     }
+}
+
+/** Liten knapp ovanpå videon. */
+@Composable
+private fun VideoButton(text: String, onClick: () -> Unit) {
+    Text(
+        text,
+        fontSize = 13.sp,
+        color = Color.White,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
 }

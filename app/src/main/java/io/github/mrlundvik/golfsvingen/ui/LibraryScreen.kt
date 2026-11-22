@@ -1,6 +1,15 @@
 package io.github.mrlundvik.golfsvingen.ui
 
 import android.Manifest
+import android.app.Activity
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.result.IntentSenderRequest
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
+import io.github.mrlundvik.golfsvingen.pose.PoseStore
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
@@ -10,7 +19,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,6 +78,27 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit) {
             loaded = true
         }
     }
+    // Markerade svingar. Håll inne en sving för att börja markera
+    var selected by remember { mutableStateOf<Set<Uri>>(emptySet()) }
+    val selecting = selected.isNotEmpty()
+    val toggle: (Clip) -> Unit = { c -> selected = if (c.uri in selected) selected - c.uri else selected + c.uri }
+    BackHandler(enabled = selecting) { selected = emptySet() }
+    // Telefonen frågar själv om svingarna får läggas i papperskorgen
+    val trashLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val gone = clips.filter { it.uri in selected }
+            scope.launch(Dispatchers.IO) {
+                for (c in gone) {
+                    runCatching { PoseStore.delete(context, c) }
+                    runCatching { MarkStore.delete(context, c) }
+                }
+            }
+            val text = if (gone.size == 1) "Svingen ligger i papperskorgen i 30 dagar" else "${gone.size} svingar ligger i papperskorgen i 30 dagar"
+            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+            selected = emptySet()
+        }
+        reload()
+    }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { reload() }
     LaunchedEffect(Unit) {
         if (ContextCompat.checkSelfPermission(context, readPermission) == PackageManager.PERMISSION_GRANTED) reload()
@@ -77,9 +106,30 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ Kamera") }
-            Text("Mina svingar", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 8.dp))
+        if (selecting) {
+            Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { selected = emptySet() }) { Text("Avbryt") }
+                Text("${selected.size} valda", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp))
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { selected = clips.map { it.uri }.toSet() }, enabled = selected.size < clips.size) { Text("Alla") }
+                TextButton(onClick = {
+                    val request = MediaStore.createTrashRequest(context.contentResolver, selected.toList(), true)
+                    trashLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                }) { Text("Radera", color = Warn) }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onBack) { Text("‹ Kamera") }
+                Text("Mina svingar", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 8.dp))
+            }
+            if (clips.isNotEmpty()) {
+                Text(
+                    "Håll inne på en sving för att markera och radera.",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(start = 24.dp, bottom = 4.dp),
+                )
+            }
         }
         if (loaded && clips.isEmpty()) {
             Text(
@@ -91,20 +141,40 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit) {
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(clips, key = { it.uri.toString() }) { clip -> ClipRow(clip) { onOpen(clip) } }
+            items(clips, key = { it.uri.toString() }) { clip ->
+                ClipRow(
+                    clip,
+                    selected = clip.uri in selected,
+                    onClick = { if (selecting) toggle(clip) else onOpen(clip) },
+                    onLongClick = { toggle(clip) },
+                )
+            }
         }
     }
 }
 
 private val dateFormat = SimpleDateFormat("EEE d MMM HH:mm", Locale("sv", "SE"))
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ClipRow(clip: Clip, onClick: () -> Unit) {
+private fun ClipRow(clip: Clip, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier
+            .fillMaxWidth()
+            .background(if (selected) Green.copy(alpha = 0.18f) else Color.Transparent)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Thumb(clip.uri)
+        Box {
+            Thumb(clip.uri)
+            if (selected) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(3.dp).size(22.dp).clip(CircleShape).background(Green),
+                    contentAlignment = Alignment.Center,
+                ) { Text("✓", color = Color.Black, fontSize = 13.sp) }
+            }
+        }
         Spacer(Modifier.width(14.dp))
         Column {
             Text(dateFormat.format(Date(clip.takenSec * 1000)), style = MaterialTheme.typography.titleMedium)

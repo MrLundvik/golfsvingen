@@ -262,6 +262,10 @@ object PoseStore {
         }
     }.getOrNull()
 
+    fun delete(context: Context, clip: Clip) {
+        file(context, clip).delete()
+    }
+
     fun save(context: Context, clip: Clip, track: PoseTrack) {
         val f = file(context, clip)
         val tmp = File(f.path + ".tmp")
