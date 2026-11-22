@@ -87,14 +87,16 @@ object ClipStore {
     }
 
     /**
-     * Hämtar en film från en annan app, till exempel Google Foto, Drive eller Filer, till svingarna. Bara videon
-     * följer med, utan ljud, och den kodas inte om. Svingen får filmens inspelningstid om filmen har en.
+     * Kopierar en film till svingarna. Bara videon följer med, utan ljud, och den kodas inte om. Svingen får
+     * inspelningstiden ur [dateSource] om den filmen har en. Används av [VideoImport].
      */
-    fun import(context: Context, source: Uri): Clip {
-        val recorded = MediaMetadataRetriever().use { r ->
-            r.setDataSource(context, source)
-            recordedMs(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE))
-        }
+    fun import(context: Context, source: Uri, dateSource: Uri = source): Clip {
+        val recorded = runCatching {
+            MediaMetadataRetriever().use { r ->
+                r.setDataSource(context, dateSource)
+                recordedMs(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE))
+            }
+        }.getOrNull()
         val taken = recorded ?: System.currentTimeMillis()
         val name = "Golfsvingen_" + SimpleDateFormat(STAMP, Locale.ROOT).format(Date(taken)) + "_import.mp4"
         val (uri, _) = remux(context, source, name, 0L, Long.MAX_VALUE, fromStart = false)

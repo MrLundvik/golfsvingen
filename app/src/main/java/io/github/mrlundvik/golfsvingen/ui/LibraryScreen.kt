@@ -57,6 +57,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import io.github.mrlundvik.golfsvingen.store.Clip
 import io.github.mrlundvik.golfsvingen.store.ClipStore
+import io.github.mrlundvik.golfsvingen.store.VideoImport
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -110,12 +112,22 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit, onCompare: (Clip, 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { reload() }
     // En film från en annan app hämtas till svingarna och öppnas, så att analysen börjar
     var importing by remember { mutableStateOf(false) }
+    // Andelen klar när filmen görs om, till exempel en HDR-film från en iPhone
+    var converted by remember { mutableStateOf<Float?>(null) }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         importing = true
+        converted = null
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { ClipStore.import(context, uri) } }
+            val result = try {
+                Result.success(VideoImport.import(context, uri) { converted = it })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
             importing = false
+            converted = null
             result.onSuccess { clip ->
                 reload()
                 onOpen(clip)
@@ -170,6 +182,14 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit, onCompare: (Clip, 
                 TextButton(onClick = { importLauncher.launch("video/*") }, enabled = !importing) {
                     Text(if (importing) "Hämtar…" else "Importera")
                 }
+            }
+            converted?.let { done ->
+                Text(
+                    "Filmen görs om till vanliga färger för analysen, ${(done * 100).toInt()} %. Det tar en stund för HDR-filmer.",
+                    fontSize = 12.sp,
+                    color = Sun,
+                    modifier = Modifier.padding(start = 24.dp, end = 16.dp, bottom = 4.dp),
+                )
             }
             if (clips.isNotEmpty()) {
                 Text(
