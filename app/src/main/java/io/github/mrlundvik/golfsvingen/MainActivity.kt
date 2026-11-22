@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import io.github.mrlundvik.golfsvingen.store.Clip
 import io.github.mrlundvik.golfsvingen.ui.CameraScreen
+import io.github.mrlundvik.golfsvingen.ui.CompareScreen
 import io.github.mrlundvik.golfsvingen.ui.GolfTheme
 import io.github.mrlundvik.golfsvingen.ui.LibraryScreen
 import io.github.mrlundvik.golfsvingen.ui.PlayerScreen
@@ -54,6 +55,9 @@ sealed interface Screen {
     data object Camera : Screen
     data object Library : Screen
     data class Player(val clip: Clip) : Screen
+    /** Välj en sving att jämföra [first] med. */
+    data class Pick(val first: Clip) : Screen
+    data class Compare(val a: Clip, val b: Clip) : Screen
 }
 
 @Composable
@@ -61,14 +65,37 @@ fun App(activity: MainActivity) {
     var screen by remember { mutableStateOf<Screen>(Screen.Camera) }
     SideEffect { activity.shutterEnabled = screen == Screen.Camera }
     BackHandler(enabled = screen != Screen.Camera) {
-        screen = if (screen is Screen.Player) Screen.Library else Screen.Camera
+        screen = when (val s = screen) {
+            is Screen.Player -> Screen.Library
+            is Screen.Pick -> Screen.Player(s.first)
+            is Screen.Compare -> Screen.Library
+            else -> Screen.Camera
+        }
     }
     when (val s = screen) {
         Screen.Camera -> CameraScreen(activity, onOpenLibrary = { screen = Screen.Library })
-        Screen.Library -> LibraryScreen(onOpen = { screen = Screen.Player(it) }, onBack = { screen = Screen.Camera })
+        Screen.Library -> LibraryScreen(
+            onOpen = { screen = Screen.Player(it) },
+            onBack = { screen = Screen.Camera },
+            onCompare = { a, b -> screen = Screen.Compare(a, b) },
+        )
+        is Screen.Pick -> LibraryScreen(
+            onOpen = {},
+            onBack = { screen = Screen.Player(s.first) },
+            onCompare = { a, b -> screen = Screen.Compare(a, b) },
+            pickFor = s.first,
+        )
+        is Screen.Compare -> key(s.a.uri, s.b.uri) {
+            CompareScreen(s.a, s.b, onBack = { screen = Screen.Library }, onOpen = { screen = Screen.Player(it) })
+        }
         // Ny spelare för varje fil, så att ett nytt klipp inte visas i den gamla spelaren
         is Screen.Player -> key(s.clip.uri) {
-            PlayerScreen(s.clip, onBack = { screen = Screen.Library }, onOpen = { screen = Screen.Player(it) })
+            PlayerScreen(
+                s.clip,
+                onBack = { screen = Screen.Library },
+                onOpen = { screen = Screen.Player(it) },
+                onCompare = { screen = Screen.Pick(s.clip) },
+            )
         }
     }
 }

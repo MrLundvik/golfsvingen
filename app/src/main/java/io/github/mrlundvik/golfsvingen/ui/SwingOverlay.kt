@@ -50,6 +50,8 @@ import kotlin.math.min
 val LeftSide = Color(0xFF7BD389)
 val RightSide = Color(0xFF64B5F6)
 val MarkColor = Color(0xFFFF6FD8)
+/** Den andra svingen när två jämförs ovanpå varandra. */
+val CompareColor = Color(0xFFE040FB)
 
 enum class Tool { LINE, ANGLE, CIRCLE }
 
@@ -136,6 +138,8 @@ fun SwingOverlay(
     /** Videons zoom och förflyttning. Allt ritas på samma ställen i bilden, men med samma linjetjocklek. */
     zoom: Float = 1f,
     pan: Offset = Offset.Zero,
+    /** En annan sving, redan flyttad till den här svingens bild och tider, som ritas ovanpå i lila. */
+    other: PoseTrack? = null,
 ) {
     val add by rememberUpdatedState(onAdd)
     val currentZoom by rememberUpdatedState(zoom)
@@ -215,6 +219,13 @@ fun SwingOverlay(
                 }
             }
             if (showPath || guide?.pathSplitUs != null) drawHandPath(track, timeUs, pxy, guide?.pathSplitUs)
+            if (other != null) {
+                if (showPath) {
+                    drawPathPart(other.handPath, pxy, CompareColor.copy(alpha = 0.3f), 4f) { true }
+                    drawPathPart(other.handPath, pxy, CompareColor, 5f) { it.t <= timeUs }
+                }
+                if (showSkeleton) other.at(timeUs)?.let { drawSkeleton(it, pxy, tint = CompareColor) }
+            }
             if (showSkeleton && pose != null) {
                 drawSkeleton(pose, pxy)
                 for ((i, j) in guide?.bones.orEmpty()) {
@@ -252,10 +263,11 @@ fun SwingOverlay(
     }
 }
 
-private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost: Boolean = false) {
+private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost: Boolean = false, tint: Color? = null) {
     for ((i, j) in Landmark.BONES) {
         if (p.v(i) < 0.2f || p.v(j) < 0.2f) continue
         val color = when {
+            tint != null -> tint.copy(alpha = 0.85f)
             ghost -> Color.White.copy(alpha = 0.35f)
             i % 2 == 1 && j % 2 == 1 -> LeftSide.copy(alpha = 0.9f)
             i % 2 == 0 && j % 2 == 0 -> RightSide.copy(alpha = 0.9f)
@@ -264,6 +276,10 @@ private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost:
         drawLine(color, px(p.x(i), p.y(i)), px(p.x(j), p.y(j)), strokeWidth = if (ghost) 4f else 6f, cap = StrokeCap.Round)
     }
     if (ghost) return
+    if (tint != null) {
+        for (i in Landmark.JOINTS) if (p.v(i) >= 0.2f) drawCircle(tint, radius = 5f, center = px(p.x(i), p.y(i)))
+        return
+    }
     for (i in Landmark.JOINTS) {
         if (p.v(i) < 0.2f) continue
         drawCircle(Color.White, radius = 7f, center = px(p.x(i), p.y(i)))

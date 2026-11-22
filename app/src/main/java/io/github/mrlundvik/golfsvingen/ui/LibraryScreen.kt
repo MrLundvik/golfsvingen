@@ -10,6 +10,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.CircleShape
 import io.github.mrlundvik.golfsvingen.pose.PoseStore
+import io.github.mrlundvik.golfsvingen.store.Reference
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
@@ -66,15 +67,22 @@ import java.util.Locale
 private val readPermission =
     if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_VIDEO else Manifest.permission.READ_EXTERNAL_STORAGE
 
+/**
+ * Listan med svingar. Med [pickFor] väljer man i stället en sving att jämföra med, och referenssvingen står först.
+ */
 @Composable
-fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit) {
+fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit, onCompare: (Clip, Clip) -> Unit, pickFor: Clip? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var clips by remember { mutableStateOf<List<Clip>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
+    var reference by remember { mutableStateOf<Uri?>(null) }
     val reload: () -> Unit = {
         scope.launch {
-            clips = withContext(Dispatchers.IO) { ClipStore.list(context) }
+            val all = withContext(Dispatchers.IO) { ClipStore.list(context) }
+            reference = Reference.get(context)
+            clips = if (pickFor == null) all
+            else all.filter { it.uri != pickFor.uri }.sortedByDescending { it.uri == reference }
             loaded = true
         }
     }
@@ -106,12 +114,33 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-        if (selecting) {
+        if (pickFor != null) {
+            Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onBack) { Text("‹ Tillbaka") }
+                Text("Jämför med…", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 8.dp))
+            }
+            Text(
+                "Välj den andra svingen. Märk en sving som referens i spelaren, så står den först här.",
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.padding(start = 24.dp, end = 16.dp, bottom = 4.dp),
+            )
+        } else if (selecting) {
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { selected = emptySet() }) { Text("Avbryt") }
                 Text("${selected.size} valda", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp))
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { selected = clips.map { it.uri }.toSet() }, enabled = selected.size < clips.size) { Text("Alla") }
+                if (selected.size == 2) {
+                    TextButton(onClick = {
+                        // Den nyare till vänster, och referenssvingen alltid till höger
+                        val (a, b) = clips.filter { it.uri in selected }
+                            .sortedWith(compareBy<Clip>({ it.uri == reference }, { -it.takenSec }))
+                        selected = emptySet()
+                        onCompare(a, b)
+                    }) { Text("Jämför") }
+                } else {
+                    TextButton(onClick = { selected = clips.map { it.uri }.toSet() }, enabled = selected.size < clips.size) { Text("Alla") }
+                }
                 TextButton(onClick = {
                     val request = MediaStore.createTrashRequest(context.contentResolver, selected.toList(), true)
                     trashLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
@@ -124,7 +153,7 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit) {
             }
             if (clips.isNotEmpty()) {
                 Text(
-                    "Håll inne på en sving för att markera och radera.",
+                    "Håll inne på en sving för att markera. Markera två för att jämföra dem.",
                     fontSize = 12.sp,
                     color = Color.White.copy(alpha = 0.5f),
                     modifier = Modifier.padding(start = 24.dp, bottom = 4.dp),
@@ -145,8 +174,15 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit) {
                 ClipRow(
                     clip,
                     selected = clip.uri in selected,
-                    onClick = { if (selecting) toggle(clip) else onOpen(clip) },
-                    onLongClick = { toggle(clip) },
+                    isReference = clip.uri == reference,
+                    onClick = {
+                        when {
+                            pickFor != null -> onCompare(pickFor, clip)
+                            selecting -> toggle(clip)
+                            else -> onOpen(clip)
+                        }
+                    },
+                    onLongClick = { if (pickFor == null) toggle(clip) },
                 )
             }
         }
@@ -157,7 +193,7 @@ private val dateFormat = SimpleDateFormat("EEE d MMM HH:mm", Locale("sv", "SE"))
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ClipRow(clip: Clip, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun ClipRow(clip: Clip, selected: Boolean, isReference: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -181,6 +217,7 @@ private fun ClipRow(clip: Clip, selected: Boolean, onClick: () -> Unit, onLongCl
             val seconds = String.format(Locale("sv", "SE"), "%.1f", clip.durationMs / 1000.0)
             val trimmed = if (clip.name.contains("_klipp")) " · klippt" else ""
             Text("$seconds s · ${clip.sizeBytes / 1_000_000} MB$trimmed", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+            if (isReference) Text("★ Referens", fontSize = 13.sp, color = Sun)
         }
     }
 }

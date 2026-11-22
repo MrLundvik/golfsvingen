@@ -79,13 +79,18 @@ object ClipStore {
      * Sparar avsnittet [startUs]–[endUs] som en ny fil. Bilderna kopieras utan omkodning,
      * så kvaliteten är oförändrad, men klippet börjar på närmaste nyckelbild före [startUs].
      */
-    fun trim(context: Context, src: Clip, startUs: Long, endUs: Long): Clip {
+    /**
+     * Sparar avsnittet som en ny fil, utan omkodning. Returnerar det nya klippet och var i originalet det
+     * börjar, alltså nyckelbilden närmast före [startUs], så att analysen kan flyttas över.
+     */
+    fun trim(context: Context, src: Clip, startUs: Long, endUs: Long): Pair<Clip, Long> {
         val rotation = MediaMetadataRetriever().use { r ->
             r.setDataSource(context, src.uri)
             r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
         }
         val name = src.name.removeSuffix(".mp4").replace(Regex("""(_klipp)+$"""), "") + "_klipp.mp4"
         val extractor = MediaExtractor()
+        var start = 0L
         val uri = try {
             extractor.setDataSource(context, src.uri, null)
             val track = videoTrack(extractor)
@@ -94,6 +99,7 @@ object ClipStore {
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             val base = extractor.sampleTime
             require(base >= 0) { "Klippet är tomt" }
+            start = base
             val buffer = ByteBuffer.allocate(maxOf(format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 0), 8 shl 20))
             create(context, name) { muxer ->
                 muxer.setOrientationHint(rotation)
@@ -114,7 +120,7 @@ object ClipStore {
         } finally {
             extractor.release()
         }
-        return get(context, uri) ?: Clip(uri, name, src.takenSec, (endUs - startUs) / 1000, 0)
+        return (get(context, uri) ?: Clip(uri, name, src.takenSec, (endUs - startUs) / 1000, 0)) to start
     }
 
     /** Lägger appens egen fil i papperskorgen, där den finns kvar i 30 dagar. False om filen inte är appens. */

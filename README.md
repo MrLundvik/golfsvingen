@@ -36,6 +36,18 @@ I telefonens *Filmer/Golfsvingen*. De syns i Google Foto och Filer. Under **Mina
 
 **Klipp** tar bort det du inte vill spara, till exempel sekunderna när du står still. Dra i reglagets två ändar, eller stega fram till rätt bild och tryck **Start här** och **Slut här**. Medan du klipper spelas bara det valda avsnittet. **Spara klippet** sparar det som en ny fil och lägger originalet i papperskorgen, där det finns kvar i 30 dagar. Bilderna kopieras utan omkodning, så kvaliteten är oförändrad, men klippet börjar på närmaste nyckelbild, högst en halv sekund före den bild du valt.
 
+När svingen är analyserad föreslår **Klipp** själv ett avsnitt, från en halv sekund före uppställningen till strax efter avslutet. **Föreslå** tar tillbaka förslaget om du ändrat det. Analysen och dina markeringar följer med till klippet, så det behöver inte analyseras igen.
+
+## Jämföra två svingar
+
+Tryck **Jämför** i en sving och välj den andra, eller markera två svingar i listan och tryck **Jämför**. **☆ Referens** märker din bästa sving. Den står då först när du väljer, och hamnar alltid till höger.
+
+- **Sida vid sida** visar båda videorna. **Ovanpå** visar A, med B:s skelett och handbana i lila ovanpå. B flyttas och skalas så att höfterna i uppställningen hamnar på samma ställe och benen blir lika långa.
+- **I takt** synkar faserna, så att båda når uppställningen, toppen, träffen och avslutet samtidigt, även om tempot skiljer sig. **Verklig tid** synkar bara träffen, så att skillnaden i tempo syns.
+- Under videorna står båda svingarnas mätningar bredvid varandra. Tryck på A eller B uppe i videon för att öppna den svingen.
+
+Med båda videorna i 1× fart kan telefonen behöva hoppa över bilder. I slow motion går de jämnt.
+
 Filerna har verklig tid, 240 bilder per sekund. Andra spelare visar dem därför i normal fart.
 
 ## Analysen
@@ -95,7 +107,10 @@ Mikrofonen används bara för att känna igen bollträffen. Ljudet analyseras i 
 | 0.1 | Egen kamera i 240 fps, ljudtrigger med förtid, självutlösare, bibliotek, slow motion och bildstegning, klippning, spara till Drive |
 | 0.2 | Kroppspunkter (MediaPipe) ritade på videon, och ritverktyg för linjer och vinklar |
 | 0.3 | Rättning av kroppspunkterna, svingens faser, felen mäts och rangordnas, och varje fel får förklaring och övningar |
-| 0.4 | Två svingar sida vid sida, och utvecklingen över tid |
+| 0.4 | Två svingar sida vid sida eller ovanpå varandra, i takt eller i verklig tid, referenssving, och förslag när man klipper |
+| 0.5 | Vridningen av axlar och höfter, och i vilken ordning kroppen startar nedsvingen |
+| 0.6 | Utvecklingen över tid, och övningar utifrån de senaste svingarna |
+| Senare | Svingplanet bakifrån, inställning för längd och vänsterhänt, övningsläge med ljud |
 
 ## Bygga
 

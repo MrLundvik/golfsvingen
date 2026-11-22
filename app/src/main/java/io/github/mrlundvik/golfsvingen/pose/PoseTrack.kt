@@ -175,6 +175,18 @@ class PoseTrack(
         return PoseTrack(timesUs, d, width, height, delegate, analysisMs)
     }
 
+    /**
+     * Analysen för ett klipp ur den här filmen, som börjar vid [offsetUs] och slutar vid [endUs].
+     * Tiderna räknas om så att klippet börjar på noll. Null om inga bilder ryms.
+     */
+    fun excerpt(offsetUs: Long, endUs: Long): PoseTrack? {
+        val keep = (0 until size).filter { timesUs[it] in offsetUs..endUs }
+        if (keep.isEmpty()) return null
+        val d = FloatArray(keep.size * stride)
+        keep.forEachIndexed { k, f -> data.copyInto(d, k * stride, f * stride, (f + 1) * stride) }
+        return PoseTrack(LongArray(keep.size) { timesUs[keep[it]] - offsetUs }, d, width, height, delegate)
+    }
+
     /** Kroppen vid tiden [timeUs], interpolerad mellan de två närmaste analyserade bilderna. */
     fun at(timeUs: Long): Pose? {
         if (size == 0) return null

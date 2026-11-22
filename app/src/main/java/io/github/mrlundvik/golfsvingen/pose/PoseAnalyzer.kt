@@ -11,6 +11,8 @@ import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import io.github.mrlundvik.golfsvingen.store.Clip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlin.math.max
@@ -23,7 +25,12 @@ object PoseAnalyzer {
     private const val ANALYSIS_FPS = 120.0
     private const val PREF_DELEGATE = "poseDelegate"
 
-    suspend fun analyze(context: Context, clip: Clip, onProgress: (Float) -> Unit): PoseTrack = withContext(Dispatchers.Default) {
+    // En analys åt gången, även när två svingar jämförs. Kroppsmodellen tar mycket minne på grafikprocessorn
+    private val lock = Mutex()
+
+    suspend fun analyze(context: Context, clip: Clip, onProgress: (Float) -> Unit): PoseTrack = lock.withLock { analyzeNow(context, clip, onProgress) }
+
+    private suspend fun analyzeNow(context: Context, clip: Clip, onProgress: (Float) -> Unit): PoseTrack = withContext(Dispatchers.Default) {
         val meta = MediaMetadataRetriever().use { r ->
             r.setDataSource(context, clip.uri)
             fun num(key: Int) = r.extractMetadata(key)?.toDoubleOrNull()

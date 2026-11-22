@@ -90,6 +90,7 @@ import io.github.mrlundvik.golfsvingen.pose.PoseStore
 import io.github.mrlundvik.golfsvingen.pose.PoseTrack
 import io.github.mrlundvik.golfsvingen.store.Clip
 import io.github.mrlundvik.golfsvingen.store.ClipStore
+import io.github.mrlundvik.golfsvingen.store.Reference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -107,7 +108,7 @@ private val SV = Locale("sv", "SE")
 @OptIn(UnstableApi::class)
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
+fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit, onCompare: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val player = remember {
@@ -286,13 +287,37 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
         Toast.makeText(context, text, Toast.LENGTH_LONG).show()
         onOpen(next)
     }
+    // Förslag på klipp: från strax före uppställningen till strax efter avslutet
+    val suggestTrim: () -> Boolean = {
+        val phases = report?.phases
+        if (phases != null && duration > 0) {
+            trimStart = snapStart(max(0L, phases.first().timeUs / 1000 - 500))
+            trimEnd = minOf(duration, phases.last().timeUs / 1000 + 700).coerceAtLeast(trimStart + MIN_CLIP_MS)
+            true
+        } else {
+            false
+        }
+    }
+    var isReference by remember { mutableStateOf(Reference.get(context) == clip.uri) }
+
     val saveTrim: () -> Unit = {
         busy = true
         player.pause()
         val startUs = trimStart * 1000
         val endUs = trimEnd * 1000
+        val raw = track
+        val copyMarks = marks.toList()
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { ClipStore.trim(context, clip, startUs, endUs) } }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val (trimmed, offsetUs) = ClipStore.trim(context, clip, startUs, endUs)
+                    // Analysen och markeringarna följer med, så att klippet inte behöver analyseras igen
+                    raw?.excerpt(offsetUs, endUs)?.let { runCatching { PoseStore.save(context, trimmed, it) } }
+                    if (copyMarks.isNotEmpty()) runCatching { MarkStore.save(context, trimmed, copyMarks) }
+                    if (Reference.get(context) == clip.uri) Reference.set(context, trimmed.uri)
+                    trimmed
+                }
+            }
             val next = result.getOrNull()
             if (next == null) {
                 busy = false
@@ -631,10 +656,21 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                 )
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(onClick = { trimming = false }, enabled = !busy) { Text("Avbryt") }
+                    if (report != null) TextButton(onClick = { if (suggestTrim()) player.seekTo(trimStart) }, enabled = !busy) { Text("Föreslå") }
                     Button(onClick = saveTrim, enabled = !busy) { Text(if (busy) "Sparar…" else "Spara klippet") }
                 }
             } else {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    TextButton(onClick = onCompare) { Text("Jämför") }
+                    TextButton(onClick = {
+                        isReference = !isReference
+                        Reference.set(context, if (isReference) clip.uri else null)
+                        Toast.makeText(
+                            context,
+                            if (isReference) "Referenssving. Den visas först när du jämför." else "Inte längre referenssving",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }) { Text(if (isReference) "★ Referens" else "☆ Referens") }
                     TextButton(onClick = {
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "video/mp4"
@@ -645,9 +681,12 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                     }) { Text("Dela") }
                     TextButton(onClick = {
                         player.pause()
-                        trimStart = 0L
-                        trimEnd = duration
+                        if (!suggestTrim()) {
+                            trimStart = 0L
+                            trimEnd = duration
+                        }
                         trimming = true
+                        player.seekTo(trimStart)
                     }, enabled = duration > MIN_CLIP_MS) { Text("Klipp") }
                     TextButton(onClick = { saveLauncher.launch(clip.name) }) { Text("Spara till…") }
                     TextButton(onClick = {
