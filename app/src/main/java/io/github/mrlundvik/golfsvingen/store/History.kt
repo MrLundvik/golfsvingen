@@ -27,7 +27,7 @@ class SavedMetric(
 )
 
 /** Det som behövs av en svings rapport för att följa utvecklingen, utan att analysera om den. */
-class SavedReport(val uri: Uri, val takenSec: Long, val view: View, val metrics: List<SavedMetric>)
+class SavedReport(val uri: Uri, val takenSec: Long, val view: View, val metrics: List<SavedMetric>, val legCm: Float)
 
 /** Rapporterna sparas som små filer i appens egna filer, en per sving, när rapporten räknas fram. */
 object History {
@@ -50,7 +50,7 @@ object History {
         }
         val json = JSONObject()
             .put("uri", clip.uri.toString()).put("takenSec", clip.takenSec).put("view", report.view.name)
-            .put("metrics", metrics)
+            .put("legCm", report.legCm.toDouble()).put("metrics", metrics)
         val f = file(context, clip.uri)
         val tmp = File(f.path + ".tmp")
         tmp.writeText(json.toString())
@@ -67,7 +67,18 @@ object History {
         file(context, uri).delete()
     }
 
-    fun has(context: Context, uri: Uri) = file(context, uri).exists()
+    /**
+     * Om svingen har en rapport räknad med benlängden [legCm]. Rapporter från före längdinställningen räknades
+     * med 80 cm. En sving som inte gav någon rapport räknas som klar, eftersom längden inte ändrar det.
+     */
+    fun isCurrent(context: Context, uri: Uri, legCm: Float): Boolean {
+        val f = file(context, uri)
+        if (!f.exists()) return false
+        return runCatching {
+            val json = JSONObject(f.readText())
+            json.optBoolean("failed") || kotlin.math.abs(json.optDouble("legCm", 80.0) - legCm) < 0.01
+        }.getOrDefault(false)
+    }
 
     /** Alla sparade rapporter, äldst först. */
     fun load(context: Context): List<SavedReport> =
@@ -90,6 +101,7 @@ object History {
                             if (m.isNull("advice")) null else m.getString("advice"),
                         )
                     },
+                    json.optDouble("legCm", 80.0).toFloat(),
                 )
             }.getOrNull()
         }.sortedBy { it.takenSec }

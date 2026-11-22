@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -67,6 +68,7 @@ import io.github.mrlundvik.golfsvingen.analysis.alignTo
 import io.github.mrlundvik.golfsvingen.pose.PoseAnalyzer
 import io.github.mrlundvik.golfsvingen.pose.PoseStore
 import io.github.mrlundvik.golfsvingen.pose.PoseTrack
+import io.github.mrlundvik.golfsvingen.store.Settings
 import io.github.mrlundvik.golfsvingen.store.Clip
 import io.github.mrlundvik.golfsvingen.store.Reference
 import kotlinx.coroutines.CancellationException
@@ -180,8 +182,14 @@ fun CompareScreen(a: Clip, b: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) 
     val infoB = rememberInfo(context, b)
     val cleanA = remember(poseA.track) { poseA.track?.cleaned() }
     val cleanB = remember(poseB.track) { poseB.track?.cleaned() }
-    val reportA = remember(cleanA) { cleanA?.let { runCatching { SwingReport.build(it, null) }.getOrNull() } }
-    val reportB = remember(cleanB) { cleanB?.let { runCatching { SwingReport.build(it, null) }.getOrNull() } }
+    val legCm = remember { Settings.legCm(context) }
+    val reportA = remember(cleanA) { cleanA?.let { runCatching { SwingReport.build(it, null, legCm) }.getOrNull() } }
+    val reportB = remember(cleanB) { cleanB?.let { runCatching { SwingReport.build(it, null, legCm) }.getOrNull() } }
+    // En vänsterhänt och en högerhänt sving jämförs spegelvända, så att de svingar åt samma håll
+    var mirrorB by remember(reportA, reportB) {
+        mutableStateOf(reportA != null && reportB != null && reportA.leftHanded != reportB.leftHanded)
+    }
+    val trackB = remember(cleanB, mirrorB) { if (mirrorB) cleanB?.mirrored() else cleanB }
     val reference = remember { Reference.get(context) }
 
     var inStep by remember { mutableStateOf(true) }
@@ -197,11 +205,11 @@ fun CompareScreen(a: Clip, b: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) 
 
     val map = remember(reportA, reportB, inStep) { TimeMap.of(reportA, reportB, inStep) }
     // B:s skelett flyttat till A:s bild och tider, för läget Ovanpå
-    val aligned = remember(cleanA, cleanB, reportA, reportB, map) {
-        if (cleanA == null || cleanB == null) return@remember null
+    val aligned = remember(cleanA, trackB, reportA, reportB, map) {
+        if (cleanA == null || trackB == null) return@remember null
         val addrA = reportA?.let { cleanA.at(it.phases.first().timeUs) } ?: cleanA.address
-        val addrB = reportB?.let { cleanB.at(it.phases.first().timeUs) } ?: cleanB.address
-        if (addrA == null || addrB == null) null else alignTo(cleanB, addrB, cleanA, addrA, map)
+        val addrB = reportB?.let { trackB.at(it.phases.first().timeUs) } ?: trackB.address
+        if (addrA == null || addrB == null) null else alignTo(trackB, addrB, cleanA, addrA, map)
     }
     // Avsnittet som spelas om och om igen: från strax före uppställningen till strax efter avslutet i A
     fun window(): Pair<Long, Long> {
@@ -304,6 +312,8 @@ fun CompareScreen(a: Clip, b: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) 
             Spacer(Modifier.width(6.dp))
             FilterChip(selected = inStep, onClick = { inStep = true }, label = { Text("I takt") })
             FilterChip(selected = !inStep, onClick = { inStep = false }, label = { Text("Verklig tid") })
+            Spacer(Modifier.width(6.dp))
+            FilterChip(selected = mirrorB, onClick = { mirrorB = !mirrorB }, label = { Text("Spegla B") })
         }
 
         fun label(tag: String, clip: Clip) =
@@ -321,8 +331,9 @@ fun CompareScreen(a: Clip, b: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit) 
                         label("A", a), onLabel = { onOpen(a) }, uri = a.uri, paused = !playing, fps = infoA.fps,
                     )
                     VideoPane(
-                        Modifier.weight(1f).fillMaxSize(), playerB, infoB.aspect, cleanB, posB, showSkeleton, showPath, null,
-                        label("B", b), onLabel = { onOpen(b) }, uri = b.uri, paused = !playing, fps = infoB.fps,
+                        Modifier.weight(1f).fillMaxSize(), playerB, infoB.aspect, trackB, posB, showSkeleton, showPath, null,
+                        label("B", b) + if (mirrorB) " · spegelvänd" else "", onLabel = { onOpen(b) }, uri = b.uri,
+                        paused = !playing, fps = infoB.fps, mirror = mirrorB,
                     )
                 }
             }
@@ -390,16 +401,19 @@ private fun VideoPane(
     uri: Uri,
     paused: Boolean,
     fps: Double,
+    mirror: Boolean = false,
 ) {
+    // Spegelvänd bild vänds runt mitten. Skelettet är redan spegelvänt
+    val flip = Modifier.fillMaxSize().graphicsLayer { scaleX = if (mirror) -1f else 1f }
     Box(modifier.clipToBounds()) {
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = flip,
             factory = { ctx -> LayoutInflater.from(ctx).inflate(R.layout.player_view, null) as PlayerView },
             update = { it.player = player },
             onRelease = { it.player = null },
         )
         // Två filmer på en gång, så färre bilder i minnet per film
-        StepFrame(Modifier.fillMaxSize(), player, uri, positionMs, paused, fps, window = 24)
+        StepFrame(flip, player, uri, positionMs, paused, fps, window = 24)
         SwingOverlay(
             modifier = Modifier.fillMaxSize(),
             aspect = aspect,

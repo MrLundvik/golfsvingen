@@ -81,7 +81,8 @@ fun ReportPanel(
                 FilterChip(selected = report.view == v, onClick = { onView(v) }, label = { Text(v.label) })
             }
             Text(
-                if (report.view == report.viewGuessed) "gissat från bilden" else "ändrat av dig",
+                (if (report.view == report.viewGuessed) "gissat från bilden" else "ändrat av dig") +
+                    if (report.leftHanded) " · vänsterhänt sving" else " · högerhänt sving",
                 fontSize = 11.sp,
                 color = Color.White.copy(alpha = 0.5f),
             )

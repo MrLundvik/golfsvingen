@@ -60,6 +60,11 @@ import io.github.mrlundvik.golfsvingen.store.Clip
 import io.github.mrlundvik.golfsvingen.store.ClipStore
 import io.github.mrlundvik.golfsvingen.store.VideoImport
 import io.github.mrlundvik.golfsvingen.store.History
+import io.github.mrlundvik.golfsvingen.store.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -119,6 +124,8 @@ fun LibraryScreen(
         reload()
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { reload() }
+    var showSettings by remember { mutableStateOf(false) }
+    if (showSettings) SettingsDialog(onClose = { showSettings = false })
     // En film från en annan app hämtas till svingarna och öppnas, så att analysen börjar
     var importing by remember { mutableStateOf(false) }
     // Andelen klar när filmen görs om, till exempel en HDR-film från en iPhone
@@ -187,6 +194,8 @@ fun LibraryScreen(
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text("‹ Kamera") }
                 Text("Mina svingar", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 8.dp))
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { showSettings = true }) { Text("⚙", fontSize = 22.sp) }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onProgress) { Text("Utveckling") }
@@ -239,6 +248,57 @@ fun LibraryScreen(
             }
         }
     }
+}
+
+/**
+ * Spelarens längd, som centimetrarna i rapporten räknas om med. Vänster- eller högerhänt ställs inte in, eftersom
+ * appen ser det på varje sving.
+ */
+@Composable
+private fun SettingsDialog(onClose: () -> Unit) {
+    val context = LocalContext.current
+    var text by remember { mutableStateOf(Settings.heightCm(context)?.toString() ?: "") }
+    val value = text.trim().toIntOrNull()
+    val valid = text.isBlank() || (value != null && value in 100..230)
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Inställningar") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { v -> text = v.filter { it.isDigit() }.take(3) },
+                    label = { Text("Din längd") },
+                    suffix = { Text("cm") },
+                    singleLine = true,
+                    isError = !valid,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                Text(
+                    "Rapporten räknar om bilden till centimeter med benlängden, som är ungefär 48 % av kroppslängden. " +
+                        "Utan längd räknas benet som 80 cm, som för ungefär 167 cm. Ändrar du längden räknas utvecklingen om.",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text(
+                    "Vänster- eller högerhänt behöver inte ställas in. Appen ser det på varje sving, på vilket håll händerna " +
+                        "går i backswingen framifrån och var bollen ligger bakifrån, och mäter likadant för båda. " +
+                        "I Jämför spegelvänds B när svingarna är olika.",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                Settings.setHeightCm(context, if (text.isBlank()) null else value)
+                onClose()
+            }, enabled = valid) { Text("Spara") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Avbryt") } },
+    )
 }
 
 private val dateFormat = SimpleDateFormat("EEE d MMM HH:mm", Locale("sv", "SE"))

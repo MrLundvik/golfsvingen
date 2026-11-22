@@ -269,6 +269,13 @@ class PoseTrack(
         return PoseTrack(timesUs, d, width, height, delegate, analysisMs, dz)
     }
 
+    /** Samma sving spegelvänd i sidled, för att jämföra en vänsterhänt sving med en högerhänt. */
+    fun mirrored(): PoseTrack {
+        val d = data.copyOf()
+        for (f in 0 until size) if (found(f)) for (i in 0 until Landmark.COUNT) d[f * stride + i * 3] = 1f - d[f * stride + i * 3]
+        return PoseTrack(timesUs, d, width, height, delegate, analysisMs, depth)
+    }
+
     /**
      * Analysen för ett klipp ur den här filmen, som börjar vid [offsetUs] och slutar vid [endUs].
      * Tiderna räknas om så att klippet börjar på noll. Null om inga bilder ryms.

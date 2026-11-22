@@ -88,6 +88,7 @@ import io.github.mrlundvik.golfsvingen.pose.PoseAnalyzer
 import io.github.mrlundvik.golfsvingen.pose.PoseExport
 import io.github.mrlundvik.golfsvingen.pose.PoseStore
 import io.github.mrlundvik.golfsvingen.pose.PoseTrack
+import io.github.mrlundvik.golfsvingen.store.Settings
 import io.github.mrlundvik.golfsvingen.store.History
 import io.github.mrlundvik.golfsvingen.store.Clip
 import io.github.mrlundvik.golfsvingen.store.ClipStore
@@ -189,7 +190,7 @@ fun PlayerScreen(clip: Clip, onBack: () -> Unit, onOpen: (Clip) -> Unit, onCompa
     // Rättade punkter och svingrapporten, räknade ur analysen
     val clean = remember(track) { track?.cleaned() }
     var viewOverride by remember { mutableStateOf<View?>(null) }
-    val report = remember(clean, viewOverride) { clean?.let { runCatching { SwingReport.build(it, viewOverride) }.getOrNull() } }
+    val report = remember(clean, viewOverride) { clean?.let { runCatching { SwingReport.build(it, viewOverride, Settings.legCm(context)) }.getOrNull() } }
     // Rapporten sparas för utvecklingen över tid
     LaunchedEffect(clean, report) {
         if (clean == null) return@LaunchedEffect

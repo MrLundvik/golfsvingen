@@ -63,6 +63,7 @@ import io.github.mrlundvik.golfsvingen.store.ClipStore
 import io.github.mrlundvik.golfsvingen.store.History
 import io.github.mrlundvik.golfsvingen.store.SavedMetric
 import io.github.mrlundvik.golfsvingen.store.SavedReport
+import io.github.mrlundvik.golfsvingen.store.Settings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -99,6 +100,7 @@ private class Point(val report: SavedReport, val metric: SavedMetric)
 fun ProgressScreen(onBack: () -> Unit, onOpen: (Clip) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val legCm = remember { Settings.legCm(context) }
     var clips by remember { mutableStateOf<List<Clip>>(emptyList()) }
     var reports by remember { mutableStateOf<List<SavedReport>>(emptyList()) }
     var missing by remember { mutableStateOf<List<Clip>>(emptyList()) }
@@ -107,7 +109,9 @@ fun ProgressScreen(onBack: () -> Unit, onOpen: (Clip) -> Unit) {
         val (c, r, m) = withContext(Dispatchers.IO) {
             val all = ClipStore.list(context)
             val existing = all.map { it.uri }.toSet()
-            Triple(all, History.load(context).filter { it.uri in existing }, all.filter { !History.has(context, it.uri) })
+            // Rapporter räknade med en annan längd visas inte, utan räknas om
+            val current = History.load(context).filter { it.uri in existing && abs(it.legCm - legCm) < 0.01f }
+            Triple(all, current, all.filter { !History.isCurrent(context, it.uri, legCm) })
         }
         clips = c
         reports = r
@@ -133,7 +137,7 @@ fun ProgressScreen(onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                         val track = withContext(Dispatchers.IO) { PoseStore.load(context, clip) }
                             ?: PoseAnalyzer.analyze(context, clip) { batchProgress = it }
                                 .also { withContext(Dispatchers.IO) { PoseStore.save(context, clip, it) } }
-                        val report = withContext(Dispatchers.Default) { SwingReport.build(track.cleaned(), null) }
+                        val report = withContext(Dispatchers.Default) { SwingReport.build(track.cleaned(), null, legCm) }
                         withContext(Dispatchers.IO) {
                             if (report != null) History.save(context, clip, report) else History.saveFailed(context, clip)
                         }
@@ -173,11 +177,12 @@ fun ProgressScreen(onBack: () -> Unit, onOpen: (Clip) -> Unit) {
                     } else {
                         val n = missing.size
                         Text(
-                            if (n == 1) "En sving är inte analyserad än." else "$n svingar är inte analyserade än.",
+                            if (n == 1) "En sving saknar en aktuell rapport." else "$n svingar saknar en aktuell rapport.",
                             fontSize = 14.sp,
                         )
                         Text(
-                            "Svingar analyseras när du öppnar dem. Det tar ungefär en halv minut per sving.",
+                            "Antingen är de inte analyserade än, vilket tar ungefär en halv minut per sving, " +
+                                "eller så har längden ändrats, och då räknas de om på någon sekund.",
                             fontSize = 12.sp,
                             color = Muted,
                         )

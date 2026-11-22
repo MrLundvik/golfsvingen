@@ -109,7 +109,9 @@ Tempot räknas från att händerna börjar röra sig till toppen, och från att 
 
 Felen rangordnas efter hur stora de är och hur grundläggande de är. Tryck på ett fel för att läsa vad det innebär, hur det ska se ut och vilka övningar som hjälper, med länkar till filmer. **Visa** hoppar till rätt bild och ritar referenslinjer, med uppställningen som en vit skugga så att det syns vad som rört sig. Rapporten krymper då till den mätningen, så att videon får plats. **◀ Förra** och **Nästa ▶** går mellan mätningarna, chipsen väljer vad som ritas, och **‹ Rapporten** visar hela rapporten igen.
 
-Centimetrarna räknas fram med benlängden, höft till fotled, som skala. Den antas vara 80 cm. Gränserna är uppskattade och en utgångspunkt, inte en sanning. De justeras när fler svingar har testats.
+Centimetrarna räknas fram med benlängden, höft till fotled, som skala. Ställ in din längd under ⚙ i Mina svingar, så räknas benet som 48 % av den. Utan längd räknas benet som 80 cm, som för ungefär 167 cm. Ändras längden räknas utvecklingen om, på någon sekund per sving. Gränserna är uppskattade och en utgångspunkt, inte en sanning. De justeras när fler svingar har testats.
+
+**Vänster- eller högerhänt** ställs inte in. Analysen läser åt vilket håll målet ligger ur svingen själv, framifrån på vilket håll händerna går i backswingen och bakifrån på var bollen ligger, så allt mäts likadant för båda. Rapporten visar vad den kom fram till. I **Jämför** spegelvänds B, både bilden och skelettet, när den ena svingen är vänsterhänt och den andra högerhänt, så att de svingar åt samma håll. **Spegla B** slår av och på det.
 
 **Dela mätdata** i rapporten sparar kroppspunkterna, med djup, som en CSV-fil i Hämtade filer/Golfsvingen, utan video, för att kunna justera mätningarna på en dator.
 
@@ -129,7 +131,8 @@ Mikrofonen används bara för att känna igen bollträffen. Ljudet analyseras i 
 | 0.4 | Två svingar sida vid sida eller ovanpå varandra, i takt eller i verklig tid, referenssving, och förslag när man klipper |
 | 0.5 | Utgick. Vridningen av axlar och höfter, och ordningen i nedsvingen, gick inte att mäta tillförlitligt med en kamera, se nedan |
 | 0.6 | Utvecklingen över tid, och övningar utifrån de senaste svingarna |
-| Senare | Svingplanet bakifrån, inställning för längd och vänsterhänt, övningsläge med ljud |
+| 0.6 | Längden som inställning, och vänster- eller högerhänt avgjort per sving, med spegelvändning i Jämför |
+| Senare | Svingplanet bakifrån, övningsläge med ljud |
 
 ## Bygga
 

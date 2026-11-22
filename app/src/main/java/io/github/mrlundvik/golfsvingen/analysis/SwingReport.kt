@@ -66,6 +66,10 @@ class Report(
     val backswingS: Float,
     val downswingS: Float,
     val metrics: List<Metric>,
+    /** Avgjort från svingen: framifrån åt vilket håll händerna går i backswingen, bakifrån var bollen ligger. */
+    val leftHanded: Boolean = false,
+    /** Benlängden som centimetrarna räknades med. */
+    val legCm: Float = 80f,
 ) {
     val faults get() = metrics.filter { it.status == Status.FAULT }.sortedByDescending { it.score }
     val others get() = metrics.filter { it.status != Status.FAULT }
@@ -77,7 +81,6 @@ class Report(
  * med benlängden, höft till fotled, som skala, eftersom benen står ungefär lodrätt från båda hållen.
  */
 object SwingReport {
-    private const val LEG_CM = 80f
     /** Händerna räknas som höga när de är så här många benlängder över uppställningen. */
     private const val HIGH = 0.55f
     /** Händerna står stilla under så här många benlängder per sekund, eller under [START_SHARE] av backswingens fart. */
@@ -95,7 +98,7 @@ object SwingReport {
     private const val DEPTH_STEP = 0.1f
     private val SV = Locale("sv", "SE")
 
-    fun build(track: PoseTrack, viewOverride: View?): Report? {
+    fun build(track: PoseTrack, viewOverride: View?, legCm: Float = 80f): Report? {
         val frames = (0 until track.size).filter { track.found(it) }
         if (frames.size < 20) return null
         val w = track.width.toFloat()
@@ -119,7 +122,7 @@ object SwingReport {
         val legs = poses.map { (ankleMid(it) - hipMid(it)).getDistance() }.sorted()
         val leg = legs[legs.size / 2]
         if (leg < 10f) return null
-        fun cm(px: Float) = px / leg * LEG_CM
+        fun cm(px: Float) = px / leg * legCm
 
         // Händerna, utjämnade över ±2 bilder
         val handsRaw = poses.map { mid(it, Landmark.WRIST_L, Landmark.WRIST_R) }
@@ -472,7 +475,10 @@ object SwingReport {
                 Metric(m.id, m.name, m.value, m.goal, m.status, m.score, m.timeUs, m.guide, m.advice, v, unit, good)
             } ?: m
         }
-        return Report(view, guessed, phases, backswingS, downswingS, numbered)
+        // Framifrån går händerna åt spelarens bakre sida i backswingen, och bakifrån ligger bollen framför spelaren.
+        // Högerhänta svingar därför åt vänster i bilden framifrån, och har bollen till höger bakifrån
+        val leftHanded = if (view == View.FACE_ON) hands[top].x > hands[start].x else hands[start].x < hipMid(p0).x
+        return Report(view, guessed, phases, backswingS, downswingS, numbered, leftHanded, legCm)
     }
 
     private fun unknown(id: String, name: String, timeUs: Long) =
