@@ -206,7 +206,7 @@ fun SwingOverlay(
             }
             if (showPath || guide?.pathSplitUs != null) drawHandPath(track, timeUs, pxy, guide?.pathSplitUs)
             if (showSkeleton && pose != null) {
-                drawSkeleton(pose, pxy, handsEstimated = track.handsEstimatedAt(timeUs))
+                drawSkeleton(pose, pxy)
                 for ((i, j) in guide?.bones.orEmpty()) {
                     drawLine(Sun, pxy(pose.x(i), pose.y(i)), pxy(pose.x(j), pose.y(j)), strokeWidth = 11f, cap = StrokeCap.Round)
                 }
@@ -242,10 +242,7 @@ fun SwingOverlay(
     }
 }
 
-// Underarmar och händer, som ritas streckade när händerna är uppskattade
-private val HAND_BONES = setOf(13 to 15, 14 to 16, 15 to 19, 16 to 20)
-
-private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost: Boolean = false, handsEstimated: Boolean = false) {
+private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost: Boolean = false) {
     for ((i, j) in Landmark.BONES) {
         if (p.v(i) < 0.2f || p.v(j) < 0.2f) continue
         val color = when {
@@ -254,21 +251,12 @@ private fun DrawScope.drawSkeleton(p: Pose, px: (Float, Float) -> Offset, ghost:
             i % 2 == 0 && j % 2 == 0 -> RightSide.copy(alpha = 0.9f)
             else -> Color.White.copy(alpha = 0.9f)
         }
-        val guessed = handsEstimated && (i to j) in HAND_BONES
-        drawLine(
-            if (guessed) color.copy(alpha = 0.6f) else color, px(p.x(i), p.y(i)), px(p.x(j), p.y(j)),
-            strokeWidth = if (ghost) 4f else 6f, cap = if (guessed) StrokeCap.Butt else StrokeCap.Round,
-            pathEffect = if (guessed) PathEffect.dashPathEffect(floatArrayOf(12f, 10f)) else null,
-        )
+        drawLine(color, px(p.x(i), p.y(i)), px(p.x(j), p.y(j)), strokeWidth = if (ghost) 4f else 6f, cap = StrokeCap.Round)
     }
     if (ghost) return
     for (i in Landmark.JOINTS) {
         if (p.v(i) < 0.2f) continue
-        if (handsEstimated && (i == Landmark.WRIST_L || i == Landmark.WRIST_R)) {
-            drawCircle(Color.White, radius = 8f, center = px(p.x(i), p.y(i)), style = Stroke(width = 3f))
-        } else {
-            drawCircle(Color.White, radius = 7f, center = px(p.x(i), p.y(i)))
-        }
+        drawCircle(Color.White, radius = 7f, center = px(p.x(i), p.y(i)))
     }
     // Ryggen, från höfternas mitt till axlarnas mitt
     val hip = px((p.x(Landmark.HIP_L) + p.x(Landmark.HIP_R)) / 2, (p.y(Landmark.HIP_L) + p.y(Landmark.HIP_R)) / 2)
@@ -289,7 +277,7 @@ private fun DrawScope.drawHandPath(track: PoseTrack, timeUs: Long, px: (Float, F
     drawPathPart(points, px, Sun, 5f) { it.t <= timeUs }
 }
 
-/** Ritar de punkter som [include] godtar. Där händerna var suddiga och läget är uppskattat blir linjen streckad. */
+/** Ritar de punkter i följd som [include] godtar. */
 private fun DrawScope.drawPathPart(
     points: List<HandPoint>,
     px: (Float, Float) -> Offset,
@@ -297,26 +285,14 @@ private fun DrawScope.drawPathPart(
     width: Float,
     include: (HandPoint) -> Boolean,
 ) {
-    val solid = Path()
-    val dashed = Path()
-    var prev: HandPoint? = null
-    var lastKind = -1
+    val path = Path()
+    var started = false
     for (p in points) {
-        if (!include(p)) { prev = null; lastKind = -1; continue }
-        val q = prev
-        if (q != null) {
-            val kind = if (p.estimated || q.estimated) 1 else 0
-            val path = if (kind == 1) dashed else solid
-            val a = px(q.x, q.y)
-            val b = px(p.x, p.y)
-            if (kind != lastKind) path.moveTo(a.x, a.y)
-            path.lineTo(b.x, b.y)
-            lastKind = kind
-        }
-        prev = p
+        if (!include(p)) continue
+        val o = px(p.x, p.y)
+        if (!started) { path.moveTo(o.x, o.y); started = true } else path.lineTo(o.x, o.y)
     }
-    drawPath(solid, color, style = Stroke(width = width, cap = StrokeCap.Round))
-    drawPath(dashed, color, style = Stroke(width = width, pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 12f))))
+    if (started) drawPath(path, color, style = Stroke(width = width, cap = StrokeCap.Round))
 }
 
 private fun DrawScope.drawMark(m: Mark, r: Rect, stroke: Float, paint: Paint, px: (Offset) -> Offset) {

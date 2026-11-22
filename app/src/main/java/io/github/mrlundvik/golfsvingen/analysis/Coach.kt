@@ -47,8 +47,8 @@ object Coach {
     )
     val TEMPO_SLOW = Advice(
         faultTitle = "Lång paus vid toppen",
-        why = "Nedsvingen kommer långt efter backswingen. En lång paus eller en seg start nedåt gör det svårt att få rytm och fart i träffen.",
-        ideal = "Backswingen tar ungefär tre gånger så lång tid som nedsvingen. Hos proffs är det ofta 0,7–1,0 s upp och 0,25–0,33 s ned.",
+        why = "Händerna står still länge vid toppen innan nedsvingen kommer igång. Rytmen bryts, och det blir svårt att få fart i träffen utan att armarna tar över.",
+        ideal = "Kroppen börjar nedsvingen ungefär när händerna når toppen, så att svingen blir en sammanhängande rörelse. Backswingen tar ungefär tre gånger så lång tid som nedsvingen.",
         drills = listOf(countTempo, toneTempo),
     )
 

@@ -60,8 +60,6 @@ class Report(
     val backswingS: Float,
     val downswingS: Float,
     val metrics: List<Metric>,
-    /** Händerna var suddiga någon gång mellan toppen och avslutet, och deras läge är uppskattat där. */
-    val handsEstimated: Boolean = false,
 ) {
     val faults get() = metrics.filter { it.status == Status.FAULT }.sortedByDescending { it.score }
     val others get() = metrics.filter { it.status != Status.FAULT }
@@ -76,8 +74,13 @@ object SwingReport {
     private const val LEG_CM = 80f
     /** Händerna räknas som höga när de är så här många benlängder över uppställningen. */
     private const val HIGH = 0.55f
-    /** Händerna står stilla under så här många benlängder per sekund. */
+    /** Händerna står stilla under så här många benlängder per sekund, eller under [START_SHARE] av backswingens fart. */
     private const val STILL = 0.15f
+    private const val START_SHARE = 0.06f
+    /** Nedsvingen börjar på allvar när händerna når så stor andel av sin högsta fart. */
+    private const val DOWN_SHARE = 0.2f
+    /** En längre paus än så här vid toppen räknas som ett fel. */
+    private const val LONG_PAUSE_S = 0.3f
     private val SV = Locale("sv", "SE")
 
     fun build(track: PoseTrack, viewOverride: View?): Report? {
@@ -88,7 +91,6 @@ object SwingReport {
         val n = frames.size
         val poses = frames.map { track.poseAt(it) }
         val times = LongArray(n) { track.timesUs[frames[it]] }
-        val est = BooleanArray(n) { track.handsEstimated(frames[it]) }
 
         fun pt(p: Pose, i: Int) = Offset(p.x(i) * w, p.y(i) * h)
         fun mid(p: Pose, a: Int, b: Int) = (pt(p, a) + pt(p, b)) / 2f
@@ -143,19 +145,26 @@ object SwingReport {
             while (m < n && height[m] > HIGH) m++
             (k until m).maxBy { height[it] }
         } else n - 1
-        var start = top
-        while (start > 2 && !(speed[start] < STILL && speed[start - 1] < STILL && speed[start - 2] < STILL)) start--
+        // Uppställningen: från där backswingen går fortast, bakåt tills händerna står still. Gränsen följer
+        // svingens fart, eftersom punkterna för den bortre armen darrar lite även när händerna står still
+        val fastest = (0..top).maxBy { speed[it] }
+        val peak = (0..top).map { speed[it] }.sortedDescending().take(5).let { it[it.size / 2] }
+        val still = maxOf(STILL, START_SHARE * peak)
+        var start = fastest
+        while (start > 2 && !(speed[start] < still && speed[start - 1] < still && speed[start - 2] < still)) start--
         if (!(start < top && top < impact)) return null
+        // Nedsvingen räknas från där händerna kommer upp i fart. Tiden dessförinnan är pausen vid toppen
+        val fastestDown = (top..impact).maxBy { speed[it] }
+        var downStart = fastestDown
+        while (downStart > top && speed[downStart] >= DOWN_SHARE * speed[fastestDown]) downStart--
 
         val p0 = poses[start]
         val pTop = poses[top]
         val pImp = poses[impact]
         val pFin = poses[finish]
         val backswingS = (times[top] - times[start]) / 1e6f
-        val downswingS = (times[impact] - times[top]) / 1e6f
-        // Träffen hittas med händerna. Var de suddiga där är tiden ungefärlig
-        val impactApprox = (maxOf(0, impact - 2)..minOf(n - 1, impact + 2)).any { est[it] }
-        val approx = if (impactApprox) "≈ " else ""
+        val downswingS = (times[impact] - times[downStart]) / 1e6f
+        val pauseS = (times[downStart] - times[top]) / 1e6f
 
         // Kamerans läge: framifrån syns axlarna och höfterna breda, bakifrån nästan i linje
         val wide = (abs(pt(p0, 11).x - pt(p0, 12).x) + abs(pt(p0, 23).x - pt(p0, 24).x)) / 2 / leg
@@ -174,15 +183,16 @@ object SwingReport {
             if (fault) weight * severity.coerceIn(0.1f, 3f) else 0f, times[frame], guide, advice,
         )
 
-        // Tempo, från båda hållen
+        // Tempo, från båda hållen. Pausen vid toppen räknas för sig, så att den inte ser ut som en långsam nedsving
         val ratio = backswingS / downswingS
+        val longPause = pauseS > LONG_PAUSE_S
         metrics += metric(
             "tempo", "Tempo",
-            "$approx${f1(ratio)} : 1  (${f2(backswingS)} s upp, ${f2(downswingS)} s ned)",
-            "Bra: omkring 3 : 1",
-            ratio < 2.2f || ratio > 4.5f,
-            if (ratio < 2.2f) (2.2f - ratio) / 0.8f else (ratio - 4.5f) / 1.5f,
-            0.8f, top, Guide(), if (ratio > 4.5f) Coach.TEMPO_SLOW else Coach.TEMPO_FAST,
+            "${f1(ratio)} : 1  (${f2(backswingS)} s upp, ${f2(pauseS)} s vid toppen, ${f2(downswingS)} s ned)",
+            "Bra: omkring 3 : 1, och högst ${f1(LONG_PAUSE_S)} s vid toppen",
+            ratio < 2.2f || longPause,
+            if (ratio < 2.2f) (2.2f - ratio) / 0.8f else (pauseS - LONG_PAUSE_S) / 0.2f,
+            0.8f, top, Guide(), if (ratio < 2.2f) Coach.TEMPO_FAST else Coach.TEMPO_SLOW,
         )
 
         // Huvudets höjd i träffen, från båda hållen
@@ -381,14 +391,9 @@ object SwingReport {
             // Händernas bana: på halva höjden mellan uppställningen och toppen,
             // jämförs var händerna är på väg upp och på väg ned
             val level = (hands[start].y + hands[top].y) / 2
-            val upAt = crossing(hands, start, top, level)
-            val downAt = crossing(hands, top, impact, level)
-            val up = upAt?.first
-            val down = downAt?.first
-            val blurred = downAt != null && (maxOf(0, downAt.second - 2)..minOf(n - 1, downAt.second + 3)).any { est[it] }
-            if (blurred) {
-                metrics += unknown("over-the-top", "Händerna i nedsvingen", times[impact], "Kunde inte mätas: händerna är suddiga i nedsvingen")
-            } else if (up != null && down != null) {
+            val up = crossing(hands, start, top, level)
+            val down = crossing(hands, top, impact, level)
+            if (up != null && down != null) {
                 val outside = cm((down.x - up.x) * ball)
                 val ottFault = outside > 4f
                 metrics += metric(
@@ -417,23 +422,23 @@ object SwingReport {
         val phases = listOf(
             Phase("Uppställning", times[start]),
             Phase("Toppen", times[top]),
-            Phase(if (impactApprox) "Träffen ≈" else "Träffen", times[impact]),
+            Phase("Träffen", times[impact]),
             Phase("Avslut", times[finish]),
         )
-        return Report(view, guessed, phases, backswingS, downswingS, metrics, (top..finish).any { est[it] })
+        return Report(view, guessed, phases, backswingS, downswingS, metrics)
     }
 
-    private fun unknown(id: String, name: String, timeUs: Long, value: String = "Kunde inte mätas") =
-        Metric(id, name, value, "", Status.UNKNOWN, 0f, timeUs, Guide(), null)
+    private fun unknown(id: String, name: String, timeUs: Long) =
+        Metric(id, name, "Kunde inte mätas", "", Status.UNKNOWN, 0f, timeUs, Guide(), null)
 
-    /** Var händerna passerar höjden [level] mellan bild [from] och [to], interpolerat, och bilden före passagen. */
-    private fun crossing(hands: List<Offset>, from: Int, to: Int, level: Float): Pair<Offset, Int>? {
+    /** Var händerna passerar höjden [level] mellan bild [from] och [to], interpolerat. */
+    private fun crossing(hands: List<Offset>, from: Int, to: Int, level: Float): Offset? {
         for (i in from until to) {
             val a = hands[i]
             val b = hands[i + 1]
             if ((a.y - level) * (b.y - level) <= 0f && a.y != b.y) {
                 val t = (level - a.y) / (b.y - a.y)
-                return Offset(a.x + (b.x - a.x) * t, level) to i
+                return Offset(a.x + (b.x - a.x) * t, level)
             }
         }
         return null

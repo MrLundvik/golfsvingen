@@ -27,7 +27,7 @@ object PoseExport {
             resolver.openOutputStream(uri)!!.bufferedWriter().use { w ->
                 w.write("# Golfsvingen mätdata. x och y är andelar av bildens bredd och höjd, v hur säkert punkten syns\n")
                 w.write("# width=${raw.width} height=${raw.height} delegate=${raw.delegate} analysisMs=${raw.analysisMs}\n")
-                w.write("source,t_us,hands_estimated")
+                w.write("source,t_us")
                 for (i in 0 until Landmark.COUNT) w.write(",x$i,y$i,v$i")
                 w.write("\n")
                 fun rows(name: String, track: PoseTrack) {
@@ -36,7 +36,6 @@ object PoseExport {
                         w.write(name)
                         w.write(",")
                         w.write(track.timesUs[f].toString())
-                        w.write(if (track.handsEstimated(f)) ",1" else ",0")
                         for (k in 0 until stride) {
                             w.write(",")
                             w.write(String.format(Locale.ROOT, "%.4f", track.data[f * stride + k]))

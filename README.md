@@ -45,9 +45,11 @@ När du öppnar en sving första gången letar appen upp kroppen i 120 bilder pe
 
 Vinklarna mäts i bilden och beror därför på var kameran står. Jämför helst svingar som är filmade från samma ställe.
 
-Kroppsmodellen ser bara en platt bild. Appen rättar därför fyra vanliga fel innan något ritas eller mäts. Vänster och höger som byter plats mellan två bilder byts tillbaka. En handled som skyms av den andra handen följer den säkrare, eftersom händerna sitter ihop i greppet. Korta luckor, under 0,2 s, där en punkt är osäker fylls i mellan de närmaste säkra bilderna.
+Kroppsmodellen ser bara en platt bild. Appen rättar därför tre vanliga fel innan något ritas eller mäts:
 
-Det fjärde är rörelseoskärpa. I nedsvingen går händerna så fort att de blir suddiga i svagt ljus, och modellen lägger då handlederna inne vid kroppen. Det känns igen på att båda underarmarna blir mycket kortare än vanligt medan armarna rör sig snabbt. Händerna läggs då längs en båge runt axlarna mellan de närmaste skarpa bilderna, i högst 0,4 s. Den delen av handbanan, och underarmarna, ritas streckade. Mätningar som bygger på den delen visas som *Kunde inte mätas*.
+- **Vänster och höger byter plats** mellan två bilder. De byts tillbaka.
+- **En handled tappas.** Den kan skymmas av den andra handen, eller bli suddig i nedsvingen. Den följer då den andra handleden, eftersom händerna sitter ihop i greppet. Vilken handled som stämmer avgörs i första hand av underarmen. En tappad handled hamnar vid armbågen, så att underarmen blir för kort, medan modellen ofta är lika säker på den som på den rätta.
+- **Korta luckor**, under 0,2 s, där en punkt är osäker, fylls i mellan de närmaste säkra bilderna.
 
 ## Svingrapporten
 
@@ -57,7 +59,7 @@ Felen som mäts beror på var kameran står. Appen gissar det från bilden, och 
 
 | | Mätning | Fel när |
 |---|---|---|
-| Båda | Tempo, backswing mot nedsving | under 2,2 : 1 eller över 4,5 : 1 |
+| Båda | Tempo, backswing mot nedsving | under 2,2 : 1, eller mer än 0,3 s stilla vid toppen |
 | Båda | Huvudets höjd i träffen | mer än 8 cm ned eller 5 cm upp |
 | Framifrån | Höften vid toppen | mer än 8 cm bort från målet |
 | Framifrån | Huvudet i träffen | mer än 5 cm mot målet |
@@ -67,6 +69,8 @@ Felen som mäts beror på var kameran står. Appen gissar det från bilden, och 
 | Bakifrån | Höften i träffen | mer än 5 cm mot bollen (early extension) |
 | Bakifrån | Ryggvinkeln i träffen | mer än 10° mer upprätt än i uppställningen |
 | Bakifrån | Händerna i nedsvingen | mer än 4 cm utanför backswingen (över toppen) |
+
+Tempot räknas från att händerna börjar röra sig till toppen, och från att de kommer upp i fart nedåt till träffen. Tiden däremellan visas som tid vid toppen, så att en paus inte ser ut som en långsam nedsving.
 
 Felen rangordnas efter hur stora de är och hur grundläggande de är. Tryck på ett fel för att läsa vad det innebär, hur det ska se ut och vilka övningar som hjälper, med länkar till filmer. **Visa** hoppar till rätt bild och ritar referenslinjer, med uppställningen som en vit skugga så att det syns vad som rört sig.
 
