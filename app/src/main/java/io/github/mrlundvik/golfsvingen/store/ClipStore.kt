@@ -16,6 +16,7 @@ import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 data class Clip(
     val uri: Uri,
@@ -76,32 +77,63 @@ object ClipStore {
     }
 
     /**
-     * Sparar avsnittet [startUs]–[endUs] som en ny fil. Bilderna kopieras utan omkodning,
-     * så kvaliteten är oförändrad, men klippet börjar på närmaste nyckelbild före [startUs].
-     */
-    /**
      * Sparar avsnittet som en ny fil, utan omkodning. Returnerar det nya klippet och var i originalet det
      * börjar, alltså nyckelbilden närmast före [startUs], så att analysen kan flyttas över.
      */
     fun trim(context: Context, src: Clip, startUs: Long, endUs: Long): Pair<Clip, Long> {
+        val name = src.name.removeSuffix(".mp4").replace(Regex("""(_klipp)+$"""), "") + "_klipp.mp4"
+        val (uri, start) = remux(context, src.uri, name, startUs, endUs, fromStart = true)
+        return (get(context, uri) ?: Clip(uri, name, src.takenSec, (endUs - startUs) / 1000, 0)) to start
+    }
+
+    /**
+     * Hämtar en film från en annan app, till exempel Google Foto, Drive eller Filer, till svingarna. Bara videon
+     * följer med, utan ljud, och den kodas inte om. Svingen får filmens inspelningstid om filmen har en.
+     */
+    fun import(context: Context, source: Uri): Clip {
+        val recorded = MediaMetadataRetriever().use { r ->
+            r.setDataSource(context, source)
+            recordedMs(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE))
+        }
+        val taken = recorded ?: System.currentTimeMillis()
+        val name = "Golfsvingen_" + SimpleDateFormat(STAMP, Locale.ROOT).format(Date(taken)) + "_import.mp4"
+        val (uri, _) = remux(context, source, name, 0L, Long.MAX_VALUE, fromStart = false)
+        return get(context, uri) ?: Clip(uri, name, taken / 1000, 0, 0)
+    }
+
+    /** Inspelningstiden ur filmens metadata, som till exempel 20261122T142503.000Z i UTC. Null om den saknas. */
+    private fun recordedMs(value: String?): Long? {
+        if (value.isNullOrBlank()) return null
+        val ms = listOf("yyyyMMdd'T'HHmmss.SSS'Z'", "yyyyMMdd'T'HHmmss'Z'", "yyyyMMdd'T'HHmmss").firstNotNullOfOrNull { pattern ->
+            runCatching {
+                SimpleDateFormat(pattern, Locale.ROOT).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(value)?.time
+            }.getOrNull()
+        } ?: return null
+        // Filmer utan tid har ibland 1904 eller 1970, och en tid i framtiden är också fel
+        return ms.takeIf { it > 946_684_800_000L && it <= System.currentTimeMillis() + 86_400_000L }
+    }
+
+    /**
+     * Kopierar videon i [source] från [startUs] till [endUs] till en ny fil bland svingarna. Med [fromStart]
+     * börjar tiderna på noll i klippet, annars behålls filmens egna. Returnerar filen och var den börjar i källan.
+     */
+    private fun remux(context: Context, source: Uri, name: String, startUs: Long, endUs: Long, fromStart: Boolean): Pair<Uri, Long> {
         val rotation = MediaMetadataRetriever().use { r ->
-            r.setDataSource(context, src.uri)
+            r.setDataSource(context, source)
             r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
         }
-        val name = src.name.removeSuffix(".mp4").replace(Regex("""(_klipp)+$"""), "") + "_klipp.mp4"
         val extractor = MediaExtractor()
-        var start = 0L
-        val uri = try {
-            extractor.setDataSource(context, src.uri, null)
+        try {
+            extractor.setDataSource(context, source, null)
             val track = videoTrack(extractor)
             val format = extractor.getTrackFormat(track)
             extractor.selectTrack(track)
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-            val base = extractor.sampleTime
-            require(base >= 0) { "Klippet är tomt" }
-            start = base
+            val first = extractor.sampleTime
+            require(first >= 0) { "Filmen är tom" }
+            val base = if (fromStart) first else 0L
             val buffer = ByteBuffer.allocate(maxOf(format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 0), 8 shl 20))
-            create(context, name) { muxer ->
+            val uri = create(context, name) { muxer ->
                 muxer.setOrientationHint(rotation)
                 val out = muxer.addTrack(format)
                 muxer.start()
@@ -112,15 +144,15 @@ object ClipStore {
                     val size = extractor.readSampleData(buffer, 0)
                     if (size < 0) break
                     val key = (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0
-                    info.set(0, size, t - base, if (key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
+                    info.set(0, size, maxOf(0L, t - base), if (key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
                     muxer.writeSampleData(out, buffer, info)
                     if (!extractor.advance()) break
                 }
             }
+            return uri to first
         } finally {
             extractor.release()
         }
-        return (get(context, uri) ?: Clip(uri, name, src.takenSec, (endUs - startUs) / 1000, 0)) to start
     }
 
     /** Lägger appens egen fil i papperskorgen, där den finns kvar i 30 dagar. False om filen inte är appens. */

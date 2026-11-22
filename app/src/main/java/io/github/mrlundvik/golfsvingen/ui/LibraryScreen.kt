@@ -108,6 +108,22 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit, onCompare: (Clip, 
         reload()
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { reload() }
+    // En film från en annan app hämtas till svingarna och öppnas, så att analysen börjar
+    var importing by remember { mutableStateOf(false) }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        importing = true
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { ClipStore.import(context, uri) } }
+            importing = false
+            result.onSuccess { clip ->
+                reload()
+                onOpen(clip)
+            }.onFailure { e ->
+                Toast.makeText(context, "Filmen kunde inte hämtas: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         if (ContextCompat.checkSelfPermission(context, readPermission) == PackageManager.PERMISSION_GRANTED) reload()
         else launcher.launch(readPermission)
@@ -150,6 +166,10 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit, onCompare: (Clip, 
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text("‹ Kamera") }
                 Text("Mina svingar", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 8.dp))
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { importLauncher.launch("video/*") }, enabled = !importing) {
+                    Text(if (importing) "Hämtar…" else "Importera")
+                }
             }
             if (clips.isNotEmpty()) {
                 Text(
@@ -162,7 +182,8 @@ fun LibraryScreen(onOpen: (Clip) -> Unit, onBack: () -> Unit, onCompare: (Clip, 
         }
         if (loaded && clips.isEmpty()) {
             Text(
-                "Inga svingar ännu. Ställ telefonen så att hela kroppen syns och slå ett slag. Bollträffen sparar svingen.",
+                "Inga svingar ännu. Ställ telefonen så att hela kroppen syns och slå ett slag. Bollträffen sparar svingen. " +
+                    "Eller hämta en film från en annan app med Importera.",
                 modifier = Modifier.padding(24.dp),
             )
         }
@@ -216,7 +237,8 @@ private fun ClipRow(clip: Clip, selected: Boolean, isReference: Boolean, onClick
             Text(dateFormat.format(Date(clip.takenSec * 1000)), style = MaterialTheme.typography.titleMedium)
             val seconds = String.format(Locale("sv", "SE"), "%.1f", clip.durationMs / 1000.0)
             val trimmed = if (clip.name.contains("_klipp")) " · klippt" else ""
-            Text("$seconds s · ${clip.sizeBytes / 1_000_000} MB$trimmed", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+            val imported = if (clip.name.contains("_import")) " · importerad" else ""
+            Text("$seconds s · ${clip.sizeBytes / 1_000_000} MB$imported$trimmed", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
             if (isReference) Text("★ Referens", fontSize = 13.sp, color = Sun)
         }
     }
